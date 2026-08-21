@@ -12,7 +12,7 @@ to it.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.6.1.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.6.2.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -35,7 +35,7 @@ Then start Revit, or click Reload on the pyRevit tab if it is already open.
 without it the command fails with
 `reference 'refs/remotes/origin/master' not found`.
 
-**Or double click `Install_AVH_Schedules.bat`**, which runs the same
+**Or double click `Install_AVH_Extensions.bat`**, which runs the same
 command, and runs `pyrevit extensions update AVH` instead on every later
 run. It is the version to hand to colleagues who would rather not open a
 command prompt, and it explains itself if pyRevit is missing.
@@ -47,26 +47,21 @@ reaches everyone.
 No dependencies at all. Nothing to `pip install`, nothing bundled: the
 whole extension is standard library plus the Revit API.
 
-### Showing up in the Extension Manager
+### It will not appear in the Extension Manager
 
-pyRevit's Extension Manager lists a *catalogue*, not what is installed.
-Extensions cloned directly, as this one is, get no row in it. Registering
-`extensions.json` from this repository as a lookup source adds one:
+That window lists a *catalogue* of extensions pyRevit knows about,
+annotated with whether each is installed. It is not an inventory of what
+you have. An extension cloned directly, as this one is, gets no row in it,
+and that is expected. `pyrevit extensions` on the command line is what
+lists what is actually installed.
 
-```
-pyrevit extensions sources add "https://raw.githubusercontent.com/AVH-bjornt/AVH.extension/main/extensions.json"
-```
-
-The installer bat does this for you, and checks first so a second run does
-not list AVH twice.
-
-It must be the `raw.githubusercontent.com` address. The ordinary
-`github.com/.../blob/...` URL serves a web page rather than JSON.
-
-This is cosmetic. It affects whether AVH appears in that window, with its
-Enable and Disable buttons and its commit hash, and nothing else. The tools
-work either way. Note also that `extensions.json`, plural, is not the same
-thing as pyRevit's own per extension `extension.json` manifest, singular.
+Publishing an `extensions.json` and registering it with
+`pyrevit extensions sources add` was tried at 2.6.1 and removed at 2.6.2.
+The source registered correctly and the file was served correctly, but AVH
+never appeared, in the window or in `pyrevit extensions search`. The
+documentation only ever promises that an added source shows up in search
+results, so the Extension Manager may not read additional sources at all.
+Do not spend another afternoon on it without new evidence.
 
 ## Use
 
@@ -135,7 +130,8 @@ not in this code at all.
 | 2.5.0 | Header and section background `#195784` | Worked |
 | 2.5.1 | Icons cut from 128px to 96px | Worked |
 | 2.6.0 | Worksets panel added | Worked |
-| 2.6.1 | Listed in the Extension Manager via `extensions.json` | Current |
+| 2.6.1 | Extension Manager catalogue via `extensions.json` | Never appeared |
+| 2.6.2 | Catalogue removed, installer renamed | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this

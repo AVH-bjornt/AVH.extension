@@ -1,9 +1,9 @@
 @echo off
 setlocal enableextensions
-title AVH Schedule Export installer
+title AVH Revit tools installer
 
 rem ------------------------------------------------------------------
-rem  Installs or updates the AVH Schedule Export extension for pyRevit.
+rem  Installs or updates the AVH Revit tools extension for pyRevit.
 rem
 rem  Hands the work to the pyRevit CLI, which ships with pyRevit itself:
 rem
@@ -22,15 +22,11 @@ set "REPO=https://github.com/AVH-bjornt/AVH.extension.git"
 set "BRANCH=main"
 set "PYREVIT=https://github.com/pyrevitlabs/pyRevit/releases"
 
-rem The catalogue that makes AVH show up in pyRevit's Extension Manager
-rem alongside pyApex and the rest. Must be the raw.githubusercontent.com
-rem address: the ordinary github.com/blob/ one serves a web page, not JSON.
-set "CATALOGUE=https://raw.githubusercontent.com/AVH-bjornt/AVH.extension/main/extensions.json"
 
 set "TARGET=%APPDATA%\pyRevit\Extensions\AVH.extension"
 
 echo.
-echo   AVH Schedule Export
+echo   AVH Revit tools
 echo   ==================================================
 echo.
 
@@ -73,16 +69,6 @@ pyrevit extend ui %EXTNAME% "%REPO%" --branch=%BRANCH%
 if not exist "%TARGET%\extension.yaml" goto install_failed
 
 :report
-
-rem --- register the catalogue, once ------------------------------------
-rem Adding it twice would list AVH twice, so look before leaping. A
-rem failure here is cosmetic: it only affects whether AVH appears in the
-rem Extension Manager, never whether the tools work.
-pyrevit extensions sources 2>NUL | findstr /I /C:"%CATALOGUE%" >NUL
-if errorlevel 1 (
-  echo   Registering AVH with the pyRevit Extension Manager...
-  pyrevit extensions sources add "%CATALOGUE%" >NUL 2>&1
-)
 
 set "VER=unknown"
 for /f "tokens=2 delims==" %%v in ('findstr /b "__version__" "%TARGET%\lib\avh_schedules\__init__.py" 2^>NUL') do set "VER=%%v"
