@@ -12,12 +12,30 @@ small OOXML writer. See _Why the rewrite_ below.
 
 ## Install
 
-Delete any previous `AVH.extension` folder, then copy this one into your
-pyRevit extensions folder and reload pyRevit:
+pyRevit is required, and its installer provides the `pyrevit` command used
+here. If you have just installed pyRevit, sign out of Windows and back in
+first, or the command will not be on your PATH yet.
+
+Open Command Prompt and run:
 
 ```
-%APPDATA%\pyRevit\Extensions\AVH.extension
+pyrevit extend ui AVH "https://github.com/AVH-bjornt/AVH.extension.git" --branch=main
 ```
+
+Then start Revit, or click Reload on the pyRevit tab if it is already open.
+
+`--branch=main` is not optional. `pyrevit extend` defaults to `master`, so
+without it the command fails with
+`reference 'refs/remotes/origin/master' not found`.
+
+**Or double click `Install_AVH_Schedules.bat`**, which runs the same
+command, and runs `pyrevit extensions update AVH` instead on every later
+run. It is the version to hand to colleagues who would rather not open a
+command prompt, and it explains itself if pyRevit is missing.
+
+Because either route installs the extension as a git clone, pyRevit's own
+Update tool keeps it current from then on. Push to this repository and it
+reaches everyone.
 
 No dependencies at all. Nothing to `pip install`, nothing bundled: the
 whole extension is standard library plus the Revit API.
@@ -70,7 +88,8 @@ not in this code at all.
 | 2.4.0 | Zebra striping and dashed row rules | Subtotals blank in Excel |
 | 2.4.1 | `calcPr fullCalcOnLoad` so Excel computes them | Worked |
 | 2.4.2 | Ungrouped schedules get a total row | Worked |
-| 2.5.0 | Header and section background `#195784` | Current |
+| 2.5.0 | Header and section background `#195784` | Worked |
+| 2.5.1 | Icons cut from 128px to 96px | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -215,6 +234,10 @@ amber magnifier so the ribbon shows which one is the everyday tool.
 Checked at 96, 48, 32, 24 and 16 px against both Revit's light and dark
 ribbon greys. A navy arrow was rejected because it disappears on the dark
 theme.
+
+They are **96x96**, which is pyRevit's stated maximum. They shipped at
+128px until 2.5.1 and pyRevit logged a warning on every startup, since
+oversized icons have to be rescaled for screen scaling at load time.
 
 ## Tests
 
