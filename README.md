@@ -12,8 +12,10 @@ to it.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.5.0.** Runs on IronPython. openpyxl is gone, replaced by a
-small OOXML writer. See _Why the rewrite_ below.
+**Version 2.6.1.** Runs on IronPython. openpyxl is gone, replaced by a
+small OOXML writer. See _Why the rewrite_ below. The authoritative version
+number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
+copy and can drift.
 
 ## Install
 
@@ -44,6 +46,27 @@ reaches everyone.
 
 No dependencies at all. Nothing to `pip install`, nothing bundled: the
 whole extension is standard library plus the Revit API.
+
+### Showing up in the Extension Manager
+
+pyRevit's Extension Manager lists a *catalogue*, not what is installed.
+Extensions cloned directly, as this one is, get no row in it. Registering
+`extensions.json` from this repository as a lookup source adds one:
+
+```
+pyrevit extensions sources add "https://raw.githubusercontent.com/AVH-bjornt/AVH.extension/main/extensions.json"
+```
+
+The installer bat does this for you, and checks first so a second run does
+not list AVH twice.
+
+It must be the `raw.githubusercontent.com` address. The ordinary
+`github.com/.../blob/...` URL serves a web page rather than JSON.
+
+This is cosmetic. It affects whether AVH appears in that window, with its
+Enable and Disable buttons and its commit hash, and nothing else. The tools
+work either way. Note also that `extensions.json`, plural, is not the same
+thing as pyRevit's own per extension `extension.json` manifest, singular.
 
 ## Use
 
@@ -111,7 +134,8 @@ not in this code at all.
 | 2.4.2 | Ungrouped schedules get a total row | Worked |
 | 2.5.0 | Header and section background `#195784` | Worked |
 | 2.5.1 | Icons cut from 128px to 96px | Worked |
-| 2.6.0 | Worksets panel added | Current |
+| 2.6.0 | Worksets panel added | Worked |
+| 2.6.1 | Listed in the Extension Manager via `extensions.json` | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
