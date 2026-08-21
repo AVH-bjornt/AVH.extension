@@ -9,10 +9,13 @@ schedule's own Revit settings, and live `SUM` subtotals.
 **Worksets.** Creates one workset per linked model and assigns the links
 to it.
 
+**Tools.** Flip Grid Ends: toggles which end bubble(s) show on selected
+grids.
+
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.6.2.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.7.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -106,6 +109,26 @@ This one is Björn's, kept here so it ships with everything else. It is not
 covered by the test suites the way the schedule code is, beyond the static
 IronPython checks that every file in the extension has to pass.
 
+**AVH > Tools > Flip Grid Ends**
+
+Flips visibility of the bubbles at the ends of selected grids. If both
+bubbles were visible, one is hidden and the other is left. If one end was
+visible, the visible end swaps to the other side. If neither is visible,
+both are shown.
+
+Works on whatever grids are already selected in the model. If nothing is
+selected it prompts you to pick some on screen, filtered to grids only.
+
+Adapted from the "Flip Grid Ends" tool in the pyApex pyRevit extension
+(https://apex-project.github.io/pyApex). The version here drops pyApex's
+fallback for pyRevit older than 4.5, which AVH does not run, and replaces
+its category name match (`"Grid" in element.Category.Name`, which breaks
+on any non English Revit UI) with a plain `isinstance(element, DB.Grid)`
+check. It also fixes a real bug carried over from the original: the
+no-op branch called `Transaction.Rollback()`, lowercase b, which is not a
+method the Revit API exposes (it's `RollBack`), so a run that changed
+nothing would have raised instead of rolling back cleanly.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -131,7 +154,8 @@ not in this code at all.
 | 2.5.1 | Icons cut from 128px to 96px | Worked |
 | 2.6.0 | Worksets panel added | Worked |
 | 2.6.1 | Extension Manager catalogue via `extensions.json` | Never appeared |
-| 2.6.2 | Catalogue removed, installer renamed | Current |
+| 2.6.2 | Catalogue removed, installer renamed | Worked |
+| 2.7.0 | Tools panel: Flip Grid Ends added | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -262,6 +286,8 @@ AVH.extension/
       Diagnostics.pushbutton/
     Worksets.panel/
       Create Worksets From Links.pushbutton/
+    Tools.panel/
+      Flip Grid Ends.pushbutton/
 ```
 
 No `bundle.yaml`: it is optional, it is parsed before any Python runs, and
