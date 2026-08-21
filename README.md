@@ -1,8 +1,13 @@
-# AVH Revit schedule export
+# AVH Revit tools
 
-A pyRevit extension that exports Revit schedules to AVH styled Excel
-workbooks: Calibri, `#195784` headers, the AVH logo, grouping
-taken from each schedule's own Revit settings, and live `SUM` subtotals.
+A pyRevit extension holding AVH's in house Revit tools.
+
+**Schedules.** Exports Revit schedules to AVH styled Excel workbooks:
+Calibri, `#195784` headers, the AVH logo, grouping taken from each
+schedule's own Revit settings, and live `SUM` subtotals.
+
+**Worksets.** Creates one workset per linked model and assigns the links
+to it.
 
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
@@ -58,6 +63,8 @@ its traceback goes to the crash log and the rest still export.
 Run this if anything fails. It tests each layer independently and writes
 `AVH_export_diagnostics.txt` beside the model.
 
+It is a schedule tool only. It knows nothing about the Worksets panel.
+
 It is not needed for day to day work. Its value is on a *new* machine or
 after a Revit or pyRevit upgrade, because the failures that cost this
 build five releases were all environment specific and would recur on a
@@ -66,6 +73,20 @@ setup apart from a broken script. If you would rather not have it on the
 ribbon, delete
 `AVH.tab/Schedules.panel/Diagnostics.pushbutton/` and reload; nothing
 else depends on it.
+
+**AVH > Worksets > Create Worksets from Links**
+
+Creates one workset per linked model in the active document and puts both
+the link instance and its link type on it. Names are
+`Link_RVT_<name>` or `Link_IFC_<name>`. Existing worksets are left alone
+rather than duplicated, and the run finishes with a report listing what
+was created, skipped and assigned.
+
+The model has to be workshared. If it is not, the tool says so and stops.
+
+This one is Björn's, kept here so it ships with everything else. It is not
+covered by the test suites the way the schedule code is, beyond the static
+IronPython checks that every file in the extension has to pass.
 
 ## Why the rewrite
 
@@ -89,7 +110,8 @@ not in this code at all.
 | 2.4.1 | `calcPr fullCalcOnLoad` so Excel computes them | Worked |
 | 2.4.2 | Ungrouped schedules get a total row | Worked |
 | 2.5.0 | Header and section background `#195784` | Worked |
-| 2.5.1 | Icons cut from 128px to 96px | Current |
+| 2.5.1 | Icons cut from 128px to 96px | Worked |
+| 2.6.0 | Worksets panel added | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -214,9 +236,12 @@ AVH.extension/
     style.py    the AVH house style
     writer.py   ScheduleTable -> styled .xlsx
     crashlog.py crash logging that cannot itself fail
-  AVH.tab/Schedules.panel/
-    ExportSchedule.pushbutton/
-    Diagnostics.pushbutton/
+  AVH.tab/
+    Schedules.panel/
+      ExportSchedule.pushbutton/
+      Diagnostics.pushbutton/
+    Worksets.panel/
+      Create Worksets From Links.pushbutton/
 ```
 
 No `bundle.yaml`: it is optional, it is parsed before any Python runs, and

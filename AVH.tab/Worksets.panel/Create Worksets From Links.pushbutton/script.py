@@ -54,7 +54,7 @@ for link in link_instances:
         link_type = None
 
     if link_type is None:
-        skipped_unknown.append(str(link.Id))
+        skipped_unknown.append(u"{}".format(link.Id))
         continue
 
     try:
@@ -66,10 +66,10 @@ for link in link_instances:
             type_name = name_param.AsString() if name_param is not None else None
 
         if not type_name:
-            skipped_unknown.append("{} (no name parameter)".format(str(link.Id)))
+            skipped_unknown.append(u"{} (no name parameter)".format(link.Id))
             continue
     except Exception as e:
-        skipped_unknown.append("{} (param read: {})".format(str(link.Id), str(e)))
+        skipped_unknown.append(u"{} (param read: {})".format(link.Id, e))
         continue
 
     prefix = get_file_type_prefix(type_name)
@@ -109,7 +109,7 @@ with revit.Transaction("Create worksets from links"):
                 existing_map[ws_name] = new_ws.Id
                 created.append(ws_name)
             except Exception as e:
-                errors.append("{} => {}".format(ws_name, str(e)))
+                errors.append(u"{} => {}".format(ws_name, e))
 
     for ws_name, elements in workset_map.items():
         if ws_name not in existing_map:
@@ -127,7 +127,7 @@ with revit.Transaction("Create worksets from links"):
             else:
                 assign_errors.append("Instance read only: " + ws_name)
         except Exception as e:
-            assign_errors.append("Instance {}: {}".format(ws_name, str(e)))
+            assign_errors.append(u"Instance {}: {}".format(ws_name, e))
 
         try:
             link_type = elements["link_type"]
@@ -138,7 +138,7 @@ with revit.Transaction("Create worksets from links"):
             else:
                 assign_errors.append("Type read only: " + ws_name)
         except Exception as e:
-            assign_errors.append("Type {}: {}".format(ws_name, str(e)))
+            assign_errors.append(u"Type {}: {}".format(ws_name, e))
 
 
 # Report.
