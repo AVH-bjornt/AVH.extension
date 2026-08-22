@@ -19,7 +19,7 @@ furniture, casework, doors and equipment inside it.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.11.1.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.12.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -359,6 +359,59 @@ missing target parameter is the loudest thing in the report, and it lists
 the CCI parameters those elements *do* have, rather than reporting that
 nothing needed doing.
 
+**AVH > Forma > Make Forma View**
+
+Makes a 3D view named exactly what the model file is named, with
+everything that is not model geometry switched off: annotation
+categories, analytical categories, imported categories, linked models,
+coordination models and lines. It is the view to export to Autodesk Forma
+from.
+
+Run it again on the same model and it refreshes the view it made last
+time rather than making a second one, so it doubles as the way to put a
+Forma view back to a known state after somebody has turned things on in
+it. The view is opened when it is done.
+
+The name comes from the file name with the extension removed.
+Characters Revit refuses in an element name (`\ : { } [ ] | ; < > ? \` ~`)
+become underscores rather than being dropped, so two models whose names
+differ only in punctuation cannot collapse onto one view. A model that
+has never been saved has no file name to use, and the tool says so and
+stops rather than inventing one. **On a workshared local file the file
+name carries the username suffix Revit adds**, so the view is named after
+the local copy. Say if that should be stripped.
+
+Two things it handles that would otherwise waste an afternoon:
+
+- **A view template overrides all of this.** A reused view may have one,
+  and a new view inherits whatever `DefaultTemplateId` the 3D view type
+  carries, so even a freshly created view can arrive with a template
+  already applied. The tool asks, by name, before the transaction opens,
+  and stops if the answer is no. Writing settings that a template
+  overrules would look like the tool silently doing nothing.
+- **Coordination models are not RVT links.** Hiding the RVT Links
+  category leaves a Navisworks or IFC coordination model on screen, so
+  that category is named separately. A Revit that does not have it is
+  reported as a note, not as a failure.
+
+Annotation, analytical and imported categories go off through the same
+three properties the Visibility/Graphics checkboxes use. Each write is
+read back, and one that did not stick falls through to hiding those
+categories one at a time, with the report saying which route was taken. A
+silent difference between two machines is the expensive kind.
+
+**Imports need their own fallback.** Annotation and analytical categories
+can be gathered by `CategoryType`, but imports cannot: every imported
+DWG, DXF or SAT is a *subcategory* of `OST_ImportObjectStyles`, one per
+file. So that fallback hides the parent and then each subcategory under
+it, rather than trusting the parent to carry them. A model with no
+imports says so; a Revit with no import category at all, with the
+property already unusable, is a warning, because at that point nothing is
+hiding them.
+
+Point clouds are a fourth switch (`ArePointCloudsHidden`) and are
+deliberately left alone, because nobody has asked for it.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -394,7 +447,9 @@ not in this code at all.
 | 2.10.0 | Rooms moved by unplace and re-place, keeping their number | Reported a room moved that Revit had rolled back |
 | 2.10.1 | Commit status checked everywhere; room height predicted; Revit's errors captured | Worked |
 | 2.11.0 | Data panel: Room Data Sync | Worked |
-| 2.11.1 | Door fallback keyed on the value rather than the room | Current |
+| 2.11.1 | Door fallback keyed on the value rather than the room | Worked |
+| 2.12.0 | Forma panel: Make Forma View | Worked, first time |
+| 2.12.1 | Imported categories switched off too | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -566,6 +621,8 @@ AVH.extension/
     model.py    level move arithmetic and classification, no Revit
   lib/avh_rooms/
     model.py    what the room sync decides, no Revit
+  lib/avh_forma/
+    model.py    view naming rules and what gets switched off, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -577,11 +634,15 @@ AVH.extension/
       Remove Level.pushbutton/
     Data.panel/
       Room Data Sync.pushbutton/
+    Forma.panel/
+      Make Forma View.pushbutton/
 ```
 
-No `bundle.yaml`: it is optional, it is parsed before any Python runs, and
-it was eliminated while hunting the engine failure. Titles come from
-`__title__`.
+No `bundle.yaml` on any button: it is optional, it is parsed before any
+Python runs, and it was eliminated while hunting the engine failure.
+Titles come from `__title__`. The one that remains is
+`AVH.tab/bundle.yaml`, which does nothing but order the panels on the
+ribbon, and every new panel has to be added to its `layout` list.
 
 Icons returned in 2.1.0 now that the engine problem is understood and the
 extension is known to work. They are also parsed before any Python runs,
@@ -620,6 +681,7 @@ python test_level_move.py
 python test_remove_level_harness.py
 python test_room_sync.py
 python test_room_sync_harness.py
+python test_forma_view_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -668,6 +730,46 @@ offsets checked in millimetres, cancelling at the dry run, a read only
 offset being left alone and then opted into, an element that blocks its
 level from deletion, and an offset write failing after the level write
 has already succeeded, which must roll the whole run back.
+
+`test_forma_view_harness.py` runs the **real** Make Forma View script
+against a mocked Revit, 84 checks, plus the naming rules on their own. Its
+fake view behaves like one under a view template: it refuses category
+visibility changes while a template is applied, so the question the script
+asks before it starts is load bearing rather than decorative. It covers
+creating, refreshing an existing view rather than duplicating it, a
+template declined and accepted, a new view arriving with the view type's
+default template on it, a commit Revit rolls back, a category the view
+will not hide, a property with no setter, a property that accepts the
+value and quietly drops it, a Revit with no coordination model category,
+an unsaved model, a model with no 3D view type, and a failure mid write
+that has to leave nothing behind.
+
+Its imported DWGs are subcategories of the import parent, as they are in
+Revit, so the import fallback is exercised on the real shape rather than
+on a flat list. It also separates **a category missing from this Revit's
+`BuiltInCategory` enum** from **a category this model simply has none
+of**, which the script is entitled to treat differently: no imports in
+the model is the ordinary case and says so, while no import category at
+all, with the property already unusable, is a warning because nothing is
+then hiding them. Collapsing the two, which the fake did at first, makes
+every model without a DWG look like a failure.
+
+Every behavioural rule in it is mutation tested. Ignoring the commit
+status fails 2 checks, skipping the read back after setting a category
+group 2, dropping the per category fallback 2, never asking about the
+view template 9, skipping `CanCategoryBeHidden` 1, treating a view
+template as a reusable view 1, dropping the read back after
+`SetCategoryHidden` 3, and dropping the name sanitising 1. On the import
+side: dropping the group 6, sending imports through the CategoryType loop
+that cannot gather them 6, skipping the subcategories 1, skipping the
+parent category 1, calling a model with no imports a failure 2, and
+staying quiet about a missing import category 2.
+
+The naming checks earned their place immediately: the first version used
+`os.path.basename`, which splits on a backslash only when it is running on
+Windows, so every Revit path came back whole off Windows and had its
+backslashes turned into underscores. Fourteen checks failed and the rule
+is now split by hand, which is also the only way it can be tested at all.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the

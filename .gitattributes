@@ -1,0 +1,17 @@
+# Line endings.
+#
+# Every text file here is stored with LF. Without this, extracting a zip
+# on Windows over files that were uploaded through GitHub's web interface
+# rewrites every line of eleven files, and a 109 line change arrives as a
+# 5,500 line diff. Set once, on 22 Aug 2026, after that had happened.
+
+* text=auto eol=lf
+
+# The installer is the exception. cmd.exe is not reliable with an LF only
+# batch file, and this is the file colleagues double click, so it keeps
+# Windows endings.
+Install_AVH_Extensions.bat text eol=crlf
+
+# Never touched.
+*.png binary
+*.pyc binary
