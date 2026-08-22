@@ -13,10 +13,13 @@ to it.
 grids. Remove Level moves everything off a level and then offers to
 delete it.
 
+**Data.** Room Data Sync copies each room's CCI location ID onto the
+furniture, casework, doors and equipment inside it.
+
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.10.1.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.11.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -300,6 +303,62 @@ Also dropped: `__beta__ = True`, which hides a button unless pyRevit's
 beta tools are switched on. The title carries the warning instead, so the
 button is actually visible.
 
+**AVH > Data > Room Data Sync (BETA)**
+
+Reads `CCIMultiLevelLocationID` from each room and writes it into
+`CCISingleLevelLocationAtID` on the furniture, furniture systems,
+casework, doors, windows, specialty and mechanical equipment, stairs and
+railings found inside it. Both schedules and facilities management read
+the result.
+
+Pick the levels to cover, or cancel that picker to do the whole model.
+Nothing is written until a dry run has been printed and confirmed.
+
+**Blanks being filled and values being changed are counted, listed and
+confirmed separately.** Filling a blank is uncontroversial. Overwriting
+something a person typed is not, and burying the second inside the first
+is how a sync tool quietly destroys hand corrections. Every change shows
+its old and new value, and the confirmation offers "fill blanks only" as
+a way to take the safe half of the work when the change list looks wrong.
+
+Working out which room an element is in is three questions, not one, and
+the report says which answer was used so a suspicious value can be
+traced:
+
+- **Doors and windows** sit in a wall between two rooms, so they are in
+  neither. `ToRoom` is preferred, being the room the opening serves, and
+  `FromRoom` is the fallback.
+
+  **That fallback fires on the value, not on whether a room is there.**
+  Until 2.11.1 it fell back only when there was no ToRoom at all, so a
+  door whose ToRoom was a room with a blank CCI ID came away with nothing
+  while a perfectly good ID sat on the other side of it. It now takes the
+  first side that actually has a value, and the report says when it fell
+  through and why. If both sides are blank the preferred side is still
+  named, because that is the room somebody has to go and fix.
+- **Everything else** is asked directly first, through the room the
+  family instance reports. That only answers when the family has a room
+  calculation point, which many do not, so the fallback is the element's
+  own position.
+- **Position needs care.** An insertion point usually sits exactly on the
+  floor, which is the room's own lower boundary, and a point on a
+  boundary is in no room at all. The lookup happens 100 mm above it.
+  Removing that lift fails 14 checks in the harness.
+
+Rooms exist per phase, so each element is asked about *its own* phase
+rather than whichever happens to be last. When the phase cannot be
+resolved the unphased properties answer instead, because the first
+version gave up in that case and reported nothing to do, which looks
+exactly like a model that is already correct.
+
+**The target parameter name is not confirmed.**
+`CCIMultiLevelLocationID` is proven from AVH's room schedule exports.
+`CCISingleLevelLocationAtID` is not: the door schedule carries
+`CCISingleLevelID`, which holds a per door tag rather than a level. So a
+missing target parameter is the loudest thing in the report, and it lists
+the CCI parameters those elements *do* have, rather than reporting that
+nothing needed doing.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -333,7 +392,9 @@ not in this code at all.
 | 2.9.0 | Rehost work plane elements; offer to delete a level that still has content | Force delete worked; rehost offered 5 and failed 5 |
 | 2.9.1 | Rehost feasibility measured in a throwaway transaction instead of inferred | Worked |
 | 2.10.0 | Rooms moved by unplace and re-place, keeping their number | Reported a room moved that Revit had rolled back |
-| 2.10.1 | Commit status checked everywhere; room height predicted; Revit's errors captured | Current |
+| 2.10.1 | Commit status checked everywhere; room height predicted; Revit's errors captured | Worked |
+| 2.11.0 | Data panel: Room Data Sync | Worked |
+| 2.11.1 | Door fallback keyed on the value rather than the room | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -503,6 +564,8 @@ AVH.extension/
     crashlog.py crash logging that cannot itself fail
   lib/avh_levels/
     model.py    level move arithmetic and classification, no Revit
+  lib/avh_rooms/
+    model.py    what the room sync decides, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -512,6 +575,8 @@ AVH.extension/
     Tools.panel/
       Flip Grid Ends.pushbutton/
       Remove Level.pushbutton/
+    Data.panel/
+      Room Data Sync.pushbutton/
 ```
 
 No `bundle.yaml`: it is optional, it is parsed before any Python runs, and
@@ -530,6 +595,14 @@ Checked at 96, 48, 32, 24 and 16 px against both Revit's light and dark
 ribbon greys. A navy arrow was rejected because it disappears on the dark
 theme.
 
+Room Data Sync follows the same idea: the navy band is the room's
+location code and the teal blocks below are the things in the room taking
+it. Its body is **white**, like Export's and Diagnostics', and that is
+not decoration. A navy filled shape on Revit's dark ribbon becomes a dark
+mass on dark grey, which is the same trap that got the navy arrow
+rejected. The light interior is what carries it on both themes, and the
+first two attempts at this icon were redone for exactly that reason.
+
 They are **96x96**, which is pyRevit's stated maximum. They shipped at
 128px until 2.5.1 and pyRevit logged a warning on every startup, since
 oversized icons have to be rescaled for screen scaling at load time.
@@ -545,7 +618,14 @@ python test_edge_cases.py
 python test_script_harness.py
 python test_level_move.py
 python test_remove_level_harness.py
+python test_room_sync.py
+python test_room_sync_harness.py
 ```
+
+`test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
+installed in the desktop Python you run them with: they load the written
+workbooks back through independent code, which is the point. Nothing
+about that reaches Revit, where openpyxl cannot run at all.
 
 `test_ironpython_compat.py` is 118 static checks that every shipped file
 can actually run on IronPython 2.7: encoding declarations, u-prefixed

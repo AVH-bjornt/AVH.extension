@@ -5,7 +5,7 @@
             "type": "extension",
             "rocket_mode_compatible": "True",
             "name": "AVH",
-            "description": "AVH in house Revit tools. Schedules: export Revit schedules to AVH styled Excel workbooks. Worksets: create one workset per linked model and assign the links to it. Tools: flip grid end bubble visibility, and move elements off a level before deleting it.",
+            "description": "AVH in house Revit tools. Schedules: export Revit schedules to AVH styled Excel workbooks. Worksets: create one workset per linked model and assign the links to it. Tools: flip grid end bubble visibility, and move elements off a level before deleting it. Data: copy room CCI location IDs onto the elements inside each room.",
             "author": "AVH",
             "author_profile": "https://github.com/AVH-bjornt",
             "url": "https://github.com/AVH-bjornt/AVH.extension.git",
