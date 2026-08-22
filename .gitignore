@@ -1,0 +1,6 @@
+# Python bytecode, regenerated every time the test suites run outside
+# Revit. Left untracked it turns up in `git status` and gets swept into
+# commits by `git add -A`.
+__pycache__/
+*.pyc
+*.pyo
