@@ -9,13 +9,14 @@ schedule's own Revit settings, and live `SUM` subtotals.
 **Worksets.** Creates one workset per linked model and assigns the links
 to it.
 
-**Tools.** Flip Grid Ends: toggles which end bubble(s) show on selected
-grids.
+**Tools.** Flip Grid Ends toggles which end bubble(s) show on selected
+grids. Remove Level moves everything off a level and then offers to
+delete it.
 
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.7.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.10.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -129,6 +130,176 @@ no-op branch called `Transaction.Rollback()`, lowercase b, which is not a
 method the Revit API exposes (it's `RollBack`), so a run that changed
 nothing would have raised instead of rolling back cleanly.
 
+**AVH > Tools > Remove Level (BETA)**
+
+Confirmed working on Eldisgarður as of 2.8.2: railings and stairs moved
+onto a level 3740 mm lower and were checked in section afterwards, and had
+not shifted. The offset pairs for those are now proven against geometry
+rather than against the tool's own arithmetic. Floors and roofs are still
+only from the API docs.
+
+Pick one or more levels to clear, pick a level to move their contents
+onto, and everything that can be moved is moved while keeping its
+absolute elevation. Then it offers to delete the levels it managed to
+empty.
+
+Nothing is written until a dry run has been printed to the pyRevit output
+window and you have confirmed it. The dry run lists, per level, what will
+move and by how much, what has no offset parameter and so would
+physically shift, and what cannot be moved at all. Element ids are
+clickable.
+
+**The level parameter is found by scanning, not from a lookup table.**
+The first version carried a hardcoded list of `BuiltInParameter` names.
+Against a real model it found 116 dependents on a level and could move
+none of them, because the only model content there was a railing, whose
+level parameter was not on the list. Guessing more names would just have
+moved the gap to the next element type. So it now looks for any writable
+parameter whose storage type is `ElementId` and whose current value is
+the level being cleared, which is general and covers shared and project
+parameters too.
+
+The *offset* still needs a table, because which offset belongs to which
+level parameter is semantic and cannot be derived. Four classes result:
+
+- a level parameter found and its offset recognised, so it moves and
+  stays exactly where it is. The normal case.
+- **any** constraint on it with no offset paired to it. All or nothing:
+  even the constraints that *were* paired are left alone, because
+  repointing some and not others splits the element across two levels.
+  Held back unless you explicitly opt in, and both the report and the
+  confirmation dialog name the parameter, so the pair gets added from
+  evidence rather than invented.
+- held to the level by a **read only** parameter, so it can never be
+  freed whatever else is writable on it. Reported as stuck and left
+  entirely alone. **Rooms are the one exception**, below.
+- a **room**. A room's level parameter is read only in the API and in the
+  interface alike, so no parameter can move one. The route a person takes
+  is cut and paste; the tool takes the same route by a better road. It
+  unplaces the room, places it again in a free enclosed area on the
+  target level, and nudges it back to its own coordinates. Placing the
+  *same* room element rather than copying it is what keeps the room
+  number, which on Eldisgarður is schedule data.
+
+  Two things make this different from everything else here. It is the
+  only operation that deliberately **changes elevation**, because a room
+  sits at its level. And it depends entirely on the model: the target
+  level needs bounding geometry where the room lands, or there is nowhere
+  to put it. So feasibility is measured, not assumed. Each room move is
+  performed in full inside a transaction that is rolled back, and only
+  the ones Revit accepted are offered. A failure during the real run
+  rolls the whole room step back, because an unplaced room is worse than
+  a room that never moved.
+- bound to the level not by a parameter but by the **work plane** it sits
+  on. Offered as a separate rehost step: the curve is given an equivalent
+  plane at the same origin that no level owns, so it is freed without
+  moving. Confirmed separately from the move, because it is a different
+  operation with a different failure mode.
+
+  **Whether a curve can be rehosted is measured, not inferred.** A sketch
+  line belonging to a stair is a `CurveElement` sitting on a plane that
+  dies with the level, indistinguishable from a free model line until you
+  try to reassign it, at which point Revit says *"The curve belongs to a
+  sketch-based element, and cannot be modified independently"*. Version
+  2.9.0 offered five and failed all five. The dry run now performs every
+  rehost for real inside a transaction it rolls back, and reports only
+  what Revit accepted, demoting the rest to stuck with Revit's own
+  message as the reason. It is the same probe-and-rollback trick the tool
+  already uses on the level itself, applied to the operation.
+- nothing pointing at the level at all, usually meaning it is hosted on a
+  work plane rather than a level. Reported as stuck; these are what block
+  the delete.
+- collateral: views, viewports, anything owned by a view, element types
+  and unnamed internal sub objects. Counted, not listed, and **not
+  treated as blockers**. They were never on a level: they exist because
+  the level does, and Revit removes them with it. Counting them as
+  blockers is why the first run said 115 elements were attached to a
+  level whose real content was one railing.
+
+A level is deleted only if nothing but its own views and internals still
+depends on it, and the confirmation names how many go with it.
+
+If real elements are still on a level after everything movable has moved,
+it now offers to **delete the level anyway**, one level at a time, with
+the remaining elements listed by kind and count. Revit's own delete
+cascades, so this needs no extra deletion step: removing the level
+removes what is left on it. That is exactly why it gets its own
+confirmation rather than being folded into the ordinary one, and why a
+level whose dependency check raised is never offered. Anything else still
+attached leaves the level in place, with the blocking elements listed.
+
+If an element has its level changed but the matching offset then cannot
+be written, the whole run is rolled back rather than committed, because
+that element would otherwise sit at the wrong elevation with nothing
+saying so.
+
+It is marked BETA in the button title because **it has never been run
+against a real Revit model.** Everything below the arithmetic is covered
+only by mocks. Use it on a detached copy first.
+
+Adapted from "Remove Level Safely BETA" in the pyApex pyRevit extension
+(https://apex-project.github.io/pyApex), though almost nothing of the
+original survives. Three things in it were wrong:
+
+*The offset arithmetic.* It computed the element's absolute elevation and
+wrote that straight into the offset parameter, without subtracting the
+target level's elevation. That is correct only when the target level sits
+at 0.00, which its own transaction name, `'Change level to 0'`, admits.
+Any other target moved every element upward by exactly the target level's
+elevation. `test_level_move.py` fails 16 checks if the subtraction is ever
+dropped again.
+
+*The unit handling.* It read elevations with `AsValueString()`, stripped
+spaces and called `float()`, then wrote back with
+`SetValueString(str(value))`. AVH's Revit formats with a decimal comma, so
+the read raises `ValueError` and the write pushes a period decimal into a
+comma locale, where it is either rejected or read as a thousands
+separator. `SetValueString` returns a bool the original discarded, so a
+rejected write was silent. This is the same defect class as the CSV
+decimal comma problem that made the schedule export use tab delimiters.
+Nothing in the rewrite formats or parses a number: elevations come from
+`Level.Elevation` and offsets from `AsDouble` and `Set`, all doubles in
+internal units.
+
+### The room that produced two of the rules
+
+Worth recording, because both rules came from one element and neither was
+obvious from reading code.
+
+Room 7555204 on Eldisgarður had a **read only base level** and a
+**writable `ROOM_UPPER_LEVEL`**. Version 2.8.1 saw only the writable one,
+found no offset paired with it, put it in the opt in shift group, and on
+opt in repointed the room's upper limit from a level at 11740 mm to one
+at 8000 mm while correcting nothing. The room ended up with its ceiling
+3740 mm below its own floor, and the level was still blocked afterwards
+because the base had never moved.
+
+Two rules followed:
+
+1. **A read only parameter pointing at the level means the element cannot
+   be freed.** Moving whatever else it has is churn that changes geometry
+   for no gain. Check for these first and stop.
+2. **Every constraint needs its own paired offset, or none of them
+   move.** Repointing all the constraints found while correcting a single
+   offset is the same bug in a different shape, and a stair with base and
+   top on one level hits it without any read only parameter involved.
+
+And one wording lesson: the dialog said these elements "would move
+vertically", which is true of a base constraint and a serious
+understatement of an upper one. It now names the parameter and says a top
+constraint can end up below the element's own base.
+
+*The pickers.* Its option objects carried a `.state` flag, which is the
+`SelectFromCheckBoxes` interface, but it called `SelectFromList`, which
+returns only the ticked items and never touches `.state`. On current
+pyRevit it selected nothing and exited, so it could not have been tested
+as delivered. This uses the same name based `SelectFromList` call
+ExportSchedule already relies on.
+
+Also dropped: `__beta__ = True`, which hides a button unless pyRevit's
+beta tools are switched on. The title carries the warning instead, so the
+button is actually visible.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -155,7 +326,14 @@ not in this code at all.
 | 2.6.0 | Worksets panel added | Worked |
 | 2.6.1 | Extension Manager catalogue via `extensions.json` | Never appeared |
 | 2.6.2 | Catalogue removed, installer renamed | Worked |
-| 2.7.0 | Tools panel: Flip Grid Ends added | Current |
+| 2.7.0 | Tools panel: Flip Grid Ends added | Worked |
+| 2.8.0 | Remove Level, rewritten from pyApex with the offset maths fixed | Ran, classified nothing |
+| 2.8.1 | Level parameters found by scanning; view infrastructure no longer counted as a blocker | Moved a room's upper limit below its base |
+| 2.8.2 | Read only constraints block; every constraint needs its own paired offset; top constraint pairs added | Ran clean, geometry confirmed |
+| 2.9.0 | Rehost work plane elements; offer to delete a level that still has content | Force delete worked; rehost offered 5 and failed 5 |
+| 2.9.1 | Rehost feasibility measured in a throwaway transaction instead of inferred | Worked |
+| 2.10.0 | Rooms moved by unplace and re-place, keeping their number | Reported a room moved that Revit had rolled back |
+| 2.10.1 | Commit status checked everywhere; room height predicted; Revit's errors captured | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -210,6 +388,49 @@ Python 2 is unforgiving about all of it.
 
 `test_ironpython_compat.py` enforces all three statically, because a hand
 written checklist missed rules 1 and 2 in consecutive releases.
+
+## Never ignore what a write returns
+
+Two rules, both learned by breaking the model, and the second is the more
+important one.
+
+**Numbers must not become strings on the way into or out of Revit.**
+`AsValueString` and `SetValueString` format and parse per the Revit UI
+locale, and AVH's Revit uses a decimal comma, so `float()` on a read
+value raises and writing `str(3500.0)` pushes a period decimal into a
+comma locale where it is rejected or read as a thousands separator. Use
+`AsDouble`, `Set` and `Level.Elevation`, all doubles in internal units,
+and format to millimetres for display only. Same defect class as the CSV
+problem that made the schedule export use a tab delimiter.
+
+**And that includes `Commit`.** `Transaction.Commit()` returns a
+`TransactionStatus`. Revit validates on commit and can roll the whole
+transaction back there, returning `RolledBack` rather than raising.
+Version 2.10.0 ignored it, so a room move Revit had thrown away was
+reported as "1 room(s) moved" three lines above the same room being
+listed as still on the level about to be deleted. The level was deleted
+on the strength of that report and the room went with it.
+
+This is the same defect the tool exists to fix. The original pyApex
+script discarded the bool from `SetValueString` and so wrote values Revit
+had silently rejected; this README said so, and then the tool made the
+identical mistake one level up. **A rejected write that reports success
+is worse than a crash.**
+
+Two things follow, beyond checking the status.
+
+*Revit's objections are captured, not predicted.* An
+`IFailuresPreprocessor` on the room transactions swallows warnings,
+records the text of any error, and rolls back, so a modal dialog in the
+middle of a batch becomes a line in the report.
+
+*A rollback never validates.* This tool tests feasibility by doing the
+work in a transaction it discards, which is a good trick with a hard
+limit: anything Revit checks only at commit time is invisible to it. Room
+height is exactly that, so it is computed instead, in
+`avh_levels.room_height_after`, with no Revit involved. **When a probe
+cannot see something, arithmetic that can is worth more than a better
+probe.**
 
 ## What it decides, and how
 
@@ -280,6 +501,8 @@ AVH.extension/
     style.py    the AVH house style
     writer.py   ScheduleTable -> styled .xlsx
     crashlog.py crash logging that cannot itself fail
+  lib/avh_levels/
+    model.py    level move arithmetic and classification, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -288,6 +511,7 @@ AVH.extension/
       Create Worksets From Links.pushbutton/
     Tools.panel/
       Flip Grid Ends.pushbutton/
+      Remove Level.pushbutton/
 ```
 
 No `bundle.yaml`: it is optional, it is parsed before any Python runs, and
@@ -319,6 +543,8 @@ python test_ironpython_compat.py
 python test_against_real_exports.py
 python test_edge_cases.py
 python test_script_harness.py
+python test_level_move.py
+python test_remove_level_harness.py
 ```
 
 `test_ironpython_compat.py` is 118 static checks that every shipped file
@@ -344,6 +570,49 @@ mocked Revit, with a fake `ViewSchedule` serving the actual CC01 room
 schedule through `Export()`. Twenty one checks: the happy path, a failure
 inside the read, a TaskDialog that raises, a non schedule view, and both
 log files.
+
+`test_level_move.py` is 58 checks on the Remove Level arithmetic. It
+asserts that absolute elevation is preserved for a spread of level and
+offset combinations, and it keeps a copy of the original pyApex formula
+so it can assert the fixed one disagrees with it by exactly the target
+elevation everywhere except at 0.00. Reintroducing the missing
+subtraction fails 16 of them, which was checked by actually doing it
+rather than assumed.
+
+`test_remove_level_harness.py` runs the **real** Remove Level script
+against a mocked Revit, 122 checks. The fake document is behavioural
+rather than scripted: `Delete` works out a level's dependents from which
+elements currently sit on it, so a move genuinely clears the level and
+the delete phase sees the consequence. It covers the happy path with the
+offsets checked in millimetres, cancelling at the dry run, a read only
+offset being left alone and then opted into, an element that blocks its
+level from deletion, and an offset write failing after the level write
+has already succeeded, which must roll the whole run back.
+
+One scenario in it is a reconstruction of the first real run: a single
+railing buried in twenty pieces of view infrastructure. Before the
+rework that shape reported 116 unmovable elements and 115 blockers and
+deleted nothing. It now moves the railing and deletes the level, and
+narrowing the collateral test back to views only fails five checks.
+
+That fake has now been wrong four times, and all four were the same
+shape: **state that outlived the transaction that changed it.** It
+snapshotted the document once and restored to that snapshot on every
+rollback, so a later probe reverted an already committed move. It
+defaulted a read only level id onto every element rather than only the
+ones asked for, pinning everything to its level. It never cleared its
+pending-creations list on commit, so the next rollback deleted a sketch
+plane that had already been committed. And plan circuits were not
+elements, so they sat outside the snapshot entirely and the room
+feasibility probe left every one of them marked occupied, which made the
+real run report that the target level had nowhere to put anything.
+
+Each time a batch of unrelated checks failed together and every one of
+them pointed at the script. Revit rolls back one transaction, not the
+document's history. **A mock that is wrong in the safe direction hides
+bugs; one wrong in this direction invents them, and costs a debugging
+session aimed at code that was fine. When several unrelated checks fail
+at once, suspect the harness before the code.**
 
 ## Working on this
 
@@ -378,6 +647,24 @@ so the documented route is now tried first, and it is also what makes
 Everything crossing into .NET is exercised against mocks only, never a real
 Revit: `ViewSchedule.Export`, `GetSortGroupFields`, the schedule collector,
 TaskDialog.
+
+That goes double for **Remove Level**, which has never been run in Revit
+at all. Its arithmetic is proven and its wiring is covered by a harness,
+but every Revit call in it is unverified: `Document.Delete` and the
+rollback trick used to enumerate a level's dependents, `Level.Elevation`,
+`Parameter.AsDouble` and `Parameter.Set`, and whether a `Parameter` read
+during the dry run is still the right one to write to afterwards, which
+is why the plan stores parameter names and re-fetches rather than holding
+the objects. Run it on a detached copy before running it on anything that
+matters.
+
+Its offset pair table is now confirmed for railings and stairs against a
+real model, where the reported before and after offsets round tripped to
+the same absolute elevation, as well as by use for walls, family
+instances, structural framing and rooms. The entries for floors and roofs
+are still **only from the API docs**. If one of them is wrong the element moves vertically instead of
+staying put, which is exactly why an unrecognised pair is a shift held
+behind an opt in rather than a silent move.
 
 Group headers are matched against other columns' values, so a schedule
 grouped on a field whose values appear nowhere else, with headers shown but
