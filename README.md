@@ -11,7 +11,8 @@ to it.
 
 **Tools.** Flip Grid Ends toggles which end bubble(s) show on selected
 grids. Remove Level moves everything off a level and then offers to
-delete it.
+delete it. Isolate Warnings isolates everything Revit has a warning
+about, and clears the isolate on the next click.
 
 **Data.** Room Data Sync copies each room's CCI location ID onto the
 furniture, casework, doors and equipment inside it.
@@ -19,7 +20,7 @@ furniture, casework, doors and equipment inside it.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.12.1.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.13.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -303,6 +304,32 @@ Also dropped: `__beta__ = True`, which hides a button unless pyRevit's
 beta tools are switched on. The title carries the warning instead, so the
 button is actually visible.
 
+**AVH > Tools > Isolate Warnings**
+
+Isolates every element Revit has a warning about, in the active view.
+Click it again and the isolate clears: one button, both directions.
+
+Shift click opens a list of the warning kinds in the model with counts,
+so one kind can be isolated on its own. Most models are mostly
+"highlighted elements are joined but do not intersect", and isolating all
+of it buries the two warnings that actually matter.
+
+It isolates warnings from the **whole model**, not only those in the
+current view, so a plan view can isolate three hundred elements and look
+almost empty. Rather than leave that looking like a broken tool, it
+counts how many of them the view can show, says so in the report, and
+puts a dialog up when the answer is none.
+
+The isolate is **temporary**, the same mode as Revit's own Temporary
+Hide/Isolate. Nothing touches the view's permanent visibility. The price
+of one button doing both directions is that it also clears a temporary
+hide somebody set up by hand.
+
+`FailureMessage.GetAdditionalElements` is deliberately not included. For
+"joined but do not intersect" both elements are failing elements anyway,
+and elsewhere the additional elements are context rather than the thing
+that is wrong.
+
 **AVH > Data > Room Data Sync (BETA)**
 
 Reads `CCIMultiLevelLocationID` from each room and writes it into
@@ -449,7 +476,8 @@ not in this code at all.
 | 2.11.0 | Data panel: Room Data Sync | Worked |
 | 2.11.1 | Door fallback keyed on the value rather than the room | Worked |
 | 2.12.0 | Forma panel: Make Forma View | Worked, first time |
-| 2.12.1 | Imported categories switched off too | Current |
+| 2.12.1 | Imported categories switched off too | Shipped, imports untested in Revit |
+| 2.13.0 | Tools panel: Isolate Warnings | Current, **untested in Revit** |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -623,6 +651,8 @@ AVH.extension/
     model.py    what the room sync decides, no Revit
   lib/avh_forma/
     model.py    view naming rules and what gets switched off, no Revit
+  lib/avh_warnings/
+    model.py    warning grouping and picker labels, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -632,6 +662,7 @@ AVH.extension/
     Tools.panel/
       Flip Grid Ends.pushbutton/
       Remove Level.pushbutton/
+      Isolate Warnings.pushbutton/
     Data.panel/
       Room Data Sync.pushbutton/
     Forma.panel/
@@ -682,6 +713,7 @@ python test_remove_level_harness.py
 python test_room_sync.py
 python test_room_sync_harness.py
 python test_forma_view_harness.py
+python test_isolate_warnings_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -770,6 +802,27 @@ The naming checks earned their place immediately: the first version used
 Windows, so every Revit path came back whole off Windows and had its
 backslashes turned into underscores. Fourteen checks failed and the rule
 is now split by hand, which is also the only way it can be tested at all.
+
+`test_isolate_warnings_harness.py` runs the **real** Isolate Warnings
+script against a mocked Revit, 57 checks. Its fake view is behavioural:
+isolating sets the temporary mode, so the toggle genuinely toggles and
+the second half of a one button on/off tool can be tested at all. It
+covers the plain click, the same button clearing the isolate, shift click
+through both routes pyRevit has offered for it, a cancelled picker, a
+broken picker, a schedule or sheet that cannot be isolated, a model with
+no warnings, warning ids that no longer resolve, a warning whose API
+calls raise, an isolate where nothing is in the active view, a commit
+Revit rolls back, and a view that refuses both the isolate and the clear.
+
+Every rule is mutation tested. Ignoring the commit status fails 2 checks,
+never checking whether the view is already isolated 5, skipping
+`CanUseTemporaryVisibilityModes` 2, missing the shift click 8, reading it
+only from `EXEC_PARAMS` 2, ignoring which kinds were picked 2, dropping
+the stale id filter 4, never counting what the view can show 3, dropping
+the dedup inside a warning kind 2, and letting two long descriptions
+truncate onto the same picker label 3. That last one matters more than it
+sounds: two collided labels means picking one kind silently isolates the
+other.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the
