@@ -168,6 +168,52 @@ def label_for(state, to_label, from_label):
     return to_text_value, from_text_value
 
 
+def phase_labels(entries):
+    """Picker labels for the phases, and the map back.
+
+    `entries` is [(name, room_count)] in document order. The count is on
+    the label because the phase to pick is the one the rooms are in, and
+    nobody should have to know that in advance. The first version of this
+    tool asked the document's last phase without asking anyone, got no
+    rooms at all on Eldisgardur, and drew a plan that said "no room" at
+    every door.
+
+    Returns (labels, mapping) where mapping is label to name.
+    """
+    labels = []
+    mapping = {}
+    for name, count in entries:
+        text = to_text(name)
+        if count is None:
+            label = text
+        elif count == 1:
+            label = u"{0}  (1 room)".format(text)
+        else:
+            label = u"{0}  ({1} rooms)".format(text, count)
+        suffix = 2
+        while label in mapping and mapping[label] != text:
+            label = u"{0} [{1}]".format(label, suffix)
+            suffix += 1
+        labels.append(label)
+        mapping[label] = text
+    return labels, mapping
+
+
+def busiest_phase(entries):
+    """The name of the phase holding the most rooms, or empty.
+
+    Only used to say so in the report when the chosen phase has none,
+    which is the whole of what went wrong the first time.
+    """
+    best_name = u""
+    best_count = 0
+    for name, count in entries:
+        if count and count > best_count:
+            best_count = count
+            best_name = to_text(name)
+    return best_name
+
+
 def view_name(prefix, level_name, phase_name):
     """A stable name, so a rerun finds the view it made last time."""
     parts = [to_text(prefix), to_text(level_name)]

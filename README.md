@@ -23,7 +23,7 @@ which room each door actually takes its ID from.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.15.1.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.15.2.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -549,11 +549,26 @@ stay the same size on the sheet at 1:50 or 1:200. Drawing a fixed model
 length instead is what makes an annotation tool useless on the second
 project.
 
-**Phase.** Rooms exist per phase. The view is made on the document's last
-phase, every door is asked about that same phase, and the phase name is
-part of the view name. Room Data Sync asks each element about *its own*
-phase, so on a phased model the two can disagree, and this view says
-which phase it used rather than leaving you to guess.
+**Phase, which 2.15.0 got wrong.** Rooms exist per phase, and asking the
+wrong one gives no rooms at all rather than an error. 2.15.0 used the
+document's last phase without asking. On Eldisgarður that is Phase 2, the
+rooms are not in it, and the result was a plan reading "no room" at every
+single door: a confident drawing of nothing.
+
+The phase is now **asked, every run**, with the number of placed rooms in
+each phase on the label, because the phase to pick is whichever one the
+rooms are in and nobody should have to know that in advance. The view is
+then put on that phase, so the drawing cannot disagree with its own
+labels. If every door still comes back with no room and another phase
+does hold rooms, the report names it.
+
+**The arrows that did not draw.** At 2.15.0 the text notes appeared and
+the arrows did not. A text note is an annotation category; a detail line
+lives in the model `Lines` category. A view template on the new view, or
+a hidden `Lines` category, produces exactly that. Both are now corrected
+**and reported**, and the arrow count is in the report, so the next run
+says which it was instead of it taking another screenshot. That part is a
+probe as much as a fix, and it is labelled as one in the script.
 
 **Ownership is the view name**, `AVH Door Rooms - <level> - <phase>`. A
 view of any other name is never found, so it is never cleared and never
@@ -602,7 +617,8 @@ not in this code at all.
 | 2.14.0 | Data panel: Flip Status | Ran into the ungroup dialog on Eldisgarður |
 | 2.14.1 | Grouped elements handled instead of walked into | Shipped |
 | 2.15.0 | Data panel: Door Room Check | pyRevit refused three scripts at startup |
-| 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Current |
+| 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Worked |
+| 2.15.2 | Door Room Check: the phase is asked for, not assumed | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -1028,7 +1044,7 @@ that walks into an unignorable error looked fully covered. A mock that
 cannot fail the way production fails is not a test of that failure.
 
 `test_door_room_check_harness.py` runs the **real** Door Room Check
-script against a mocked Revit, 71 checks. The arrow geometry is checked
+script against a mocked Revit, 91 checks. The arrow geometry is checked
 as arithmetic in every direction, including diagonal, because an arrow
 pointing at the wrong room is a drawing that lies quietly. The rest
 covers the six door states, rerunning without doubling the marks, a view
@@ -1041,7 +1057,15 @@ model size instead of scaling to the view 2, never clearing the previous
 run 4, reusing any plan view rather than ours by name 1, preferring the
 unphased room over the phased one 1, treating a blank ToRoom as fine 4,
 missing the both-sides-same-room case 3, and collecting doors from every
-level 2.
+level 2. On the 2.15.2 behaviour: going back to the last phase without
+asking fails 9, dropping the room counts from the picker labels 12,
+never setting the view's phase 2, ignoring a read only view phase 1,
+leaving a view template in place 1, leaving `Lines` hidden 1, saying
+nothing when the chosen phase holds no rooms 2, and not counting the
+arrows 1.
+
+The fake door now answers only for the phase its rooms are in, which is
+the only way the picker can be tested rather than merely exercised.
 
 **Two of those checks started out as decoration and had to be rebuilt.**
 A prefix guard inside the cleanup could never fire, since the only view

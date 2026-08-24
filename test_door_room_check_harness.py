@@ -51,6 +51,7 @@ def close(a, b, tolerance=1e-6):
 _next_id = [1000]
 
 
+
 def next_id():
     _next_id[0] += 1
     return _next_id[0]
@@ -74,11 +75,21 @@ class FakeId(object):
         return "<Id {0}>".format(self.Value)
 
 
+class FakeCategoryObject(object):
+    def __init__(self, name):
+        self.Name = name
+        self.Id = FakeId()
+
+
 class FakeXYZ(object):
     def __init__(self, x, y, z=0.0):
         self.X = x
         self.Y = y
         self.Z = z
+
+
+INVALID_ID = FakeId(-1)
+LINES_CATEGORY = FakeCategoryObject(u"Lines")
 
 
 class FakeLine(object):
@@ -99,15 +110,41 @@ class FakeParameter(object):
         return self.value
 
 
+class FakeIdParameter(object):
+    """A parameter holding an ElementId, such as a phase."""
+
+    def __init__(self, element_id, read_only=False, refuses=False):
+        self.element_id = element_id
+        self.IsReadOnly = read_only
+        self.refuses = refuses
+
+    def AsElementId(self):
+        return self.element_id
+
+    def Set(self, value):
+        if self.refuses:
+            return False
+        self.element_id = value
+        return True
+
+
 class FakeRoom(object):
-    def __init__(self, number, cci=u"", name=u""):
+    def __init__(self, number, cci=u"", name=u"", phase=None, placed=True):
         self.Id = FakeId()
         self.Name = name or number
+        self.Location = FakeLocation(FakeXYZ(0, 0, 0)) if placed else None
         self.parameters = {u"Number": FakeParameter(number),
                            u"CCIMultiLevelLocationID": FakeParameter(cci)}
+        self.phase_parameter = FakeIdParameter(
+            phase.Id if phase is not None else None)
 
     def LookupParameter(self, name):
         return self.parameters.get(name)
+
+    def get_Parameter(self, built_in):
+        if built_in == "ROOM_PHASE":
+            return self.phase_parameter
+        return None
 
 
 class FakeLocation(object):
@@ -118,7 +155,7 @@ class FakeLocation(object):
 class FakeDoor(object):
     def __init__(self, level_id, origin=(0.0, 0.0), facing=(1.0, 0.0),
                  to_room=None, from_room=None, phased=True, name=u"Door",
-                 unphased_to=None, unphased_from=None):
+                 unphased_to=None, unphased_from=None, rooms_in_phase=None):
         self.Id = FakeId()
         self.LevelId = level_id
         self.Location = FakeLocation(FakeXYZ(origin[0], origin[1], 0.0))
@@ -135,25 +172,38 @@ class FakeDoor(object):
         self._unphased_from = (unphased_from if unphased_from is not None
                                else from_room)
         self.phased = phased
+        # None means the door answers for any phase. Set it and the door
+        # answers only for that one, which is how Revit behaves and the
+        # only way the phase picker can be tested at all.
+        self.rooms_in_phase = rooms_in_phase
+
+    def _answers_for(self, phase):
+        if self.rooms_in_phase is None:
+            return True
+        return phase is not None and phase.Id == self.rooms_in_phase.Id
 
     # The phased getters are what Room Data Sync uses, so they are what
     # this uses. The unphased properties answer for the last phase.
     def get_ToRoom(self, phase):
         if not self.phased:
             raise Exception("no phased getter on this element")
-        return self._to
+        return self._to if self._answers_for(phase) else None
 
     def get_FromRoom(self, phase):
         if not self.phased:
             raise Exception("no phased getter on this element")
-        return self._from
+        return self._from if self._answers_for(phase) else None
 
     @property
     def ToRoom(self):
+        if self.rooms_in_phase is not None:
+            return None
         return self._unphased_to
 
     @property
     def FromRoom(self):
+        if self.rooms_in_phase is not None:
+            return None
         return self._unphased_from
 
 
@@ -191,7 +241,9 @@ class FakeTextNote(object):
 
 
 class FakeViewPlan(object):
-    def __init__(self, name, level_id=None, scale=100, is_template=False):
+    def __init__(self, name, level_id=None, scale=100, is_template=False,
+                 template_id=None, hidden_categories=(),
+                 unhideable=(), phase_read_only=False):
         self.Id = FakeId()
         self.Name = name
         self.LevelId = level_id
@@ -199,9 +251,32 @@ class FakeViewPlan(object):
         self.IsTemplate = is_template
         self.Origin = FakeXYZ(0.0, 0.0, 0.0)
         self.overrides = {}
+        self.ViewTemplateId = (template_id if template_id is not None
+                               else INVALID_ID)
+        self.hidden = set(hidden_categories)
+        self.unhideable = set(unhideable)
+        self.phase_parameter = FakeIdParameter(None,
+                                               read_only=phase_read_only)
 
     def SetElementOverrides(self, element_id, overrides):
         self.overrides[element_id] = overrides
+
+    def get_Parameter(self, built_in):
+        if built_in == "VIEW_PHASE":
+            return self.phase_parameter
+        return None
+
+    def GetCategoryHidden(self, category_id):
+        return category_id in self.hidden
+
+    def CanCategoryBeHidden(self, category_id):
+        return category_id not in self.unhideable
+
+    def SetCategoryHidden(self, category_id, hidden):
+        if hidden:
+            self.hidden.add(category_id)
+        else:
+            self.hidden.discard(category_id)
 
 
 class FakeOverrides(object):
@@ -245,6 +320,12 @@ class FakeDocument(object):
         self.Phases = FakePhases(phases)
         self.Create = FakeCreate(self)
         self.deleted = []
+
+    def GetElement(self, element_id):
+        for element in self.elements:
+            if element.Id == element_id:
+                return element
+        return None
 
     def Delete(self, ids):
         for element_id in list(ids):
@@ -320,9 +401,10 @@ class FakeCollector(object):
         return self
 
     def OfCategory(self, category):
-        if category == "OST_Doors":
+        wanted = {"OST_Doors": FakeDoor, "OST_Rooms": FakeRoom}.get(category)
+        if wanted is not None:
             self.elements = [element for element in self.elements
-                             if isinstance(element, FakeDoor)]
+                             if isinstance(element, wanted)]
         return self
 
     def WhereElementIsNotElementType(self):
@@ -374,6 +456,8 @@ class Recorder(object):
         self.alerts = []
         self.printed = []
         self.pickers = []
+        self.picker_titles = []
+        self.phase_labels = []
         self.picked = None
 
     def alert(self, message, **kwargs):
@@ -388,7 +472,9 @@ class Recorder(object):
 
 
 def run_script(doc, picked=None, commit_status="Committed",
-               picker_raises=False, no_text_type=False):
+               picker_raises=False, no_text_type=False, phase_pick=None,
+               new_view_template=None, new_view_hidden=(),
+               new_view_unhideable=(), new_view_phase_read_only=False):
     FakeTransaction.committed = []
     FakeTransaction.rolled_back = []
     FakeTransaction.commit_status = commit_status
@@ -399,9 +485,14 @@ def run_script(doc, picked=None, commit_status="Committed",
     created_notes = []
 
     def show(items, **kwargs):
+        title = kwargs.get("title", u"")
         recorder.pickers.append(list(items))
+        recorder.picker_titles.append(title)
         if picker_raises:
             raise Exception("the picker is unavailable")
+        if u"phase" in title:
+            recorder.phase_labels = list(items)
+            return phase_pick
         return picked
 
     def create_note(document, view_id, point, text, type_id):
@@ -411,7 +502,11 @@ def run_script(doc, picked=None, commit_status="Committed",
         return note
 
     def create_plan(document, view_type_id, level_id):
-        view = FakeViewPlan(u"{3D} unnamed", level_id)
+        view = FakeViewPlan(u"{3D} unnamed", level_id,
+                            template_id=new_view_template,
+                            hidden_categories=new_view_hidden,
+                            unhideable=new_view_unhideable,
+                            phase_read_only=new_view_phase_read_only)
         document.elements.append(view)
         return view
 
@@ -420,7 +515,9 @@ def run_script(doc, picked=None, commit_status="Committed",
         TransactionStatus=Namespace(Committed="Committed",
                                     RolledBack="RolledBack"),
         FilteredElementCollector=FakeCollector,
-        BuiltInCategory=Namespace(OST_Doors="OST_Doors"),
+        BuiltInCategory=Namespace(OST_Doors="OST_Doors",
+                                  OST_Rooms="OST_Rooms",
+                                  OST_Lines="OST_Lines"),
         Level=FakeLevel,
         ViewPlan=Namespace(Create=create_plan),
         ViewFamilyType=FakeViewFamilyType,
@@ -429,9 +526,14 @@ def run_script(doc, picked=None, commit_status="Committed",
         CurveElement=FakeCurveElement,
         Line=FakeLine,
         XYZ=FakeXYZ,
-        ElementId=FakeId,
+        ElementId=Namespace(InvalidElementId=INVALID_ID),
         OverrideGraphicSettings=FakeOverrides,
         Color=FakeColor,
+        BuiltInParameter=Namespace(ROOM_PHASE="ROOM_PHASE",
+                                   VIEW_PHASE="VIEW_PHASE"),
+        Category=Namespace(GetCategory=staticmethod(
+            lambda document, built_in:
+            LINES_CATEGORY if built_in == "OST_Lines" else None)),
     )
     # ViewPlan and TextNote each have to be a class, so the cleanup
     # collector's isinstance test can match instances of them, and carry
@@ -803,6 +905,120 @@ check("phase: an element with no phased getter is still read",
       any(note.text == u"905" for note in notes_in(doc, the_view(doc))),
       str([note.text for note in notes_in(doc, the_view(doc))]))
 
+
+
+# --------------------------------------------------------------------------
+# 7. Phases, which is what 2.15.0 got wrong
+# --------------------------------------------------------------------------
+
+def phased_model(rooms_phase, other_phase, door_phase=None):
+    """Two phases, rooms in one of them, doors answering only for it."""
+    level = FakeLevel(u"E01", 0.0)
+    to_room = FakeRoom(u"105", u"+CC01.E01.A", phase=rooms_phase)
+    from_room = FakeRoom(u"106", u"+CC01.E01.B", phase=rooms_phase)
+    spare = FakeRoom(u"107", u"+CC01.E01.C", phase=rooms_phase)
+    door = FakeDoor(level.Id, (0.0, 0.0), (1.0, 0.0), to_room, from_room,
+                    rooms_in_phase=door_phase or rooms_phase)
+    elements = [level, door, to_room, from_room, spare,
+                FakeViewFamilyType(), FakeTextNoteType()]
+    doc = FakeDocument(elements, phases=[rooms_phase, other_phase])
+    return level, door, doc
+
+
+first_phase = FakePhase(u"Phase 1")
+second_phase = FakePhase(u"Phase 2")
+level, door, doc = phased_model(first_phase, second_phase)
+recorder = run_script(doc, phase_pick=None)
+
+check("phase: the picker is shown when there is more than one",
+      any(u"phase" in title for title in recorder.picker_titles),
+      u" | ".join(recorder.picker_titles))
+check("phase: the room count is on the label",
+      any(u"3 rooms" in label for label in recorder.phase_labels),
+      u" | ".join(recorder.phase_labels))
+check("phase: an empty phase says so, which is what warns you off it",
+      any(u"Phase 2" in label and u"0 rooms" in label
+          for label in recorder.phase_labels),
+      u" | ".join(recorder.phase_labels))
+check("phase: cancelling draws nothing",
+      the_view(doc) is None and not FakeTransaction.committed)
+
+# Picking the phase the rooms are in is the whole point.
+level, door, doc = phased_model(first_phase, second_phase)
+recorder = run_script(doc, phase_pick=u"Phase 1  (3 rooms)")
+view = the_view(doc)
+texts = [note.text for note in notes_in(doc, view)] if view else []
+
+check("phase: picking the one with rooms finds them",
+      u"105" in texts, str(texts))
+check("phase: the view name carries the phase",
+      view is not None and view.Name.endswith(u"Phase 1"),
+      view.Name if view else u"none")
+check("phase: the view is put on the chosen phase",
+      view is not None and view.phase_parameter.element_id == first_phase.Id)
+check("phase: the arrow count is reported",
+      u"3 arrow line(s) drawn" in recorder.text(), recorder.text()[:400])
+
+# Picking the wrong one reproduces 2.15.0 exactly, and now says so.
+level, door, doc = phased_model(first_phase, second_phase)
+recorder = run_script(doc, phase_pick=u"Phase 2  (0 rooms)")
+view = the_view(doc)
+texts = [note.text for note in notes_in(doc, view)] if view else []
+
+check("wrong phase: the view was still drawn", view is not None)
+check("wrong phase: every door comes back with no room",
+      texts and all(u"no room" in text for text in texts), str(texts))
+check("wrong phase: the report names the phase that does hold rooms",
+      u"Phase 1" in recorder.text() and
+      u"holds rooms" in recorder.text(), recorder.text()[-400:])
+check("wrong phase: and tells you to run it again",
+      u"pick that phase" in recorder.text())
+
+# A view whose phase will not take the value is reported, not hidden.
+level, door, doc = phased_model(first_phase, second_phase)
+
+
+recorder = run_script(doc, phase_pick=u"Phase 1  (3 rooms)",
+                      new_view_phase_read_only=True)
+check("phase read only: reported rather than silently ignored",
+      u"read only" in recorder.text(), recorder.text()[:400])
+check("phase read only: the run still finishes",
+      len(FakeTransaction.committed) == 1)
+
+
+# --------------------------------------------------------------------------
+# 8. Why 2.15.0 drew labels and no arrows
+# --------------------------------------------------------------------------
+
+template = FakeViewPlan(u"AVH plan standard", None, is_template=True)
+level, doc = simple_model(views=[template])
+recorder = run_script(doc, new_view_template=template.Id)
+view = the_view(doc, u"AVH Door Rooms - E01 - Phase 1")
+
+check("template on a new view: removed",
+      view is not None and view.ViewTemplateId == INVALID_ID)
+check("template on a new view: named in the report",
+      u"AVH plan standard" in recorder.text())
+check("template on a new view: the arrows are still drawn",
+      len(curves_in(doc, view)) == 3, str(len(curves_in(doc, view))))
+
+level, doc = simple_model()
+recorder = run_script(doc, new_view_hidden=(LINES_CATEGORY.Id,))
+view = the_view(doc, u"AVH Door Rooms - E01 - Phase 1")
+
+check("hidden Lines category: switched back on",
+      view is not None and LINES_CATEGORY.Id not in view.hidden)
+check("hidden Lines category: reported, since that explains 2.15.0",
+      u"no arrows" in recorder.text(), recorder.text()[:500])
+
+# And when it cannot be switched on, say so rather than drawing invisibly.
+level, doc = simple_model()
+
+
+recorder = run_script(doc, new_view_hidden=(LINES_CATEGORY.Id,),
+                      new_view_unhideable=(LINES_CATEGORY.Id,))
+check("Lines cannot be shown: warned that the arrows will not appear",
+      u"will not show" in recorder.text(), recorder.text()[:500])
 
 # --------------------------------------------------------------------------
 

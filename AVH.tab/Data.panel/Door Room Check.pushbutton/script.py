@@ -33,22 +33,42 @@ redraws, so the view is always current rather than accumulating.
 view of any other name is never found, so it is never cleared and never
 drawn into.
 
-## Phase
+## Phase, which 2.15.0 got wrong
 
-Rooms exist per phase. The view is created on the document's last phase,
-every door is asked about that same phase, and the phase name is part of
-the view name. Room Data Sync asks each element about *its own* phase
-instead, so on a phased model the two can disagree, and this view says
-which phase it used rather than leaving you to guess.
+Rooms exist per phase, and asking the wrong one gives no rooms at all
+rather than an error. 2.15.0 used the document's last phase without
+asking. On Eldisgardur that is Phase 2, the rooms are not in it, and the
+result was a plan reading "no room" at every single door: a confident
+drawing of nothing.
+
+So the phase is now **asked, every run**, with the number of placed rooms
+in each phase on the label, because the phase to pick is whichever one
+the rooms are in and nobody should have to know that in advance. The
+view is then put on that same phase, so the drawing cannot disagree with
+its own labels, and the phase stays in the view name.
+
+If every door still comes back with no room and another phase does hold
+rooms, the report says so by name rather than leaving it to a screenshot.
+
+## The missing arrows
+
+At 2.15.0 the text notes drew and the arrows did not. A text note is an
+annotation category; a detail line lives in the model `Lines` category.
+A view template on the new view, or a hidden `Lines` category, produces
+exactly that: labels and no arrows.
+
+`make_marks_visible` corrects both and **reports both**, so the next run
+says which it was. It is a probe as much as a fix, and the arrow count
+is now in the report for the same reason.
 
 ## Unverified
 
-Not yet run in Revit: `ViewPlan.Create`, `NewDetailCurve`,
+Not yet run to completion in Revit: `ViewPlan.Create`, `NewDetailCurve`,
 `TextNote.Create`, `SetElementOverrides` on detail curves,
-`FamilyInstance.FacingOrientation`, and whether the plan view's `Origin`
-sits at a Z the detail curves will accept. The room lookup itself is the
-same `get_ToRoom(phase)` route Room Data Sync has been running on
-Eldisgardur.
+`BuiltInParameter.VIEW_PHASE` and `ROOM_PHASE`, and whether the plan
+view's `Origin` sits at a Z the detail curves will accept. The room
+lookup is the same `get_ToRoom(phase)` route Room Data Sync runs on
+Eldisgardur, and the phase failure above is confirmed.
 """
 
 __title__ = "Door Room\nCheck"
@@ -83,14 +103,92 @@ SOURCE_PARAM = u"CCIMultiLevelLocationID"
 MAX_LISTED = 30
 
 
-def last_phase(doc):
+def id_value(element_id):
+    if element_id is None:
+        return None
+    value = getattr(element_id, "Value", None)
+    if value is None:
+        value = getattr(element_id, "IntegerValue", None)
+    return value
+
+
+def all_phases(doc):
+    phases = []
     try:
-        phases = doc.Phases
-        if phases and phases.Size:
-            return phases[phases.Size - 1]
+        collection = doc.Phases
+        if collection and collection.Size:
+            for index in range(collection.Size):
+                phases.append(collection[index])
     except BaseException as exc:
         logger.debug(to_text(exc))
-    return None
+    return phases
+
+
+def room_counts_by_phase(doc):
+    """How many placed rooms each phase holds, keyed by phase id value.
+
+    This is what makes the phase picker usable: the phase to pick is
+    whichever one the rooms are in, and nobody should have to know that
+    in advance. Unplaced rooms are skipped, since a room with no location
+    tells you nothing about which phase is the working one.
+    """
+    counts = {}
+    try:
+        collector = DB.FilteredElementCollector(doc)
+        collector = collector.OfCategory(DB.BuiltInCategory.OST_Rooms)
+        collector = collector.WhereElementIsNotElementType()
+        for room in collector:
+            try:
+                if room.Location is None:
+                    continue
+            except BaseException:
+                pass
+            try:
+                parameter = room.get_Parameter(DB.BuiltInParameter.ROOM_PHASE)
+                if parameter is None:
+                    continue
+                key = id_value(parameter.AsElementId())
+            except BaseException:
+                continue
+            if key is None:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+    return counts
+
+
+def pick_phase(doc):
+    """Which phase to read rooms in. Returns (phase, entries) or (None, ...).
+
+    Always asked, because getting it wrong is invisible: 2.15.0 used the
+    document's last phase without asking, found no rooms in it on
+    Eldisgardur, and drew a plan reading "no room" at every door.
+    """
+    phases = all_phases(doc)
+    if not phases:
+        return None, []
+
+    counts = room_counts_by_phase(doc)
+    entries = [(element_name(phase), counts.get(id_value(phase.Id), 0))
+               for phase in phases]
+
+    if len(phases) == 1:
+        return phases[0], entries
+
+    labels, mapping = model.phase_labels(entries)
+    chosen = forms.SelectFromList.show(
+        labels, multiselect=False, title=TITLE + u": which phase are the "
+        u"rooms in?", button_name="Use this phase")
+    if not chosen:
+        return None, entries
+    if isinstance(chosen, list):
+        chosen = chosen[0] if chosen else None
+    wanted = mapping.get(to_text(chosen))
+    for phase in phases:
+        if element_name(phase) == wanted:
+            return phase, entries
+    return None, entries
 
 
 def element_name(element):
@@ -305,6 +403,76 @@ def draw_text(doc, view, z, point, text, type_id):
         return None
 
 
+def set_view_phase(view, phase):
+    """Put the view on the same phase the rooms were read in.
+
+    A plan showing Phase 2 while the labels were read from Phase 1 would
+    be a drawing that disagrees with itself. Returns a note for the
+    report, empty when there was nothing to say.
+    """
+    if phase is None:
+        return u""
+    try:
+        parameter = view.get_Parameter(DB.BuiltInParameter.VIEW_PHASE)
+    except BaseException as exc:
+        return u"the view's phase could not be read ({0})".format(to_text(exc))
+    if parameter is None:
+        return u"this view has no phase parameter"
+    if parameter.IsReadOnly:
+        return u"the view's phase is read only"
+    try:
+        if not parameter.Set(phase.Id):
+            return u"the view's phase would not take the value"
+    except BaseException as exc:
+        return u"the view's phase could not be set ({0})".format(to_text(exc))
+    return u""
+
+
+def make_marks_visible(doc, view):
+    """Make sure the view will actually show detail lines.
+
+    **This is a probe as much as a fix.** At 2.15.0 the text notes drew
+    and the arrows did not, and the difference between them is that a
+    text note is an annotation category while a detail line lives in the
+    model `Lines` category. A view template on the new view, or a hidden
+    Lines category, would produce exactly that: labels with no arrows.
+
+    Both are corrected here and both are reported, so the next run says
+    which one it was rather than leaving it to another screenshot.
+    """
+    notes = []
+
+    try:
+        template_id = view.ViewTemplateId
+        if template_id is not None and template_id != DB.ElementId.InvalidElementId:
+            name = element_name(doc.GetElement(template_id)) or u"a template"
+            view.ViewTemplateId = DB.ElementId.InvalidElementId
+            notes.append(u"removed the view template \"{0}\", which would "
+                         u"have overruled the visibility settings".format(name))
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+
+    try:
+        built_in = getattr(DB.BuiltInCategory, "OST_Lines", None)
+        if built_in is not None:
+            category = DB.Category.GetCategory(doc, built_in)
+            if category is not None:
+                if view.GetCategoryHidden(category.Id):
+                    if view.CanCategoryBeHidden(category.Id):
+                        view.SetCategoryHidden(category.Id, False)
+                        notes.append(u"the Lines category was hidden in this "
+                                     u"view and has been switched back on, "
+                                     u"which is why 2.15.0 drew no arrows")
+                    else:
+                        notes.append(u"the Lines category is hidden in this "
+                                     u"view and cannot be switched on, so "
+                                     u"the arrows will not show")
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+
+    return notes
+
+
 def view_plane_z(view, level):
     try:
         origin = view.Origin
@@ -318,13 +486,26 @@ def view_plane_z(view, level):
         return 0.0
 
 
-def report(tally, level_name, phase_name, view_label, cleared):
+def report(tally, level_name, phase_name, view_label, cleared,
+           curves, notes, entries):
     output.print_md(u"### {0}".format(TITLE))
     output.print_md(u"**{0}**, {1} door(s), phase {2}.".format(
         view_label, tally.total(), phase_name or u"unknown"))
+    output.print_md(u"{0} arrow line(s) drawn.".format(curves))
     if cleared:
         output.print_md(u"_Refreshed: {0} mark(s) from the last run "
                         u"removed._".format(cleared))
+    for note in notes:
+        output.print_md(u"_{0}._".format(note))
+
+    # The failure the phase picker exists to prevent, said out loud.
+    if tally.counts.get(model.NO_ROOMS) == tally.total() and tally.total():
+        busiest = model.busiest_phase(entries)
+        if busiest and busiest != phase_name:
+            output.print_md(
+                u"**No door found a room in {0}, while {1} holds rooms.** "
+                u"Run it again and pick that phase.".format(
+                    phase_name or u"that phase", busiest))
 
     for label, count in tally.rows():
         output.print_md(u"- {0}: **{1}**".format(label, count))
@@ -354,7 +535,9 @@ def run():
     if level is None:
         return
 
-    phase = last_phase(doc)
+    phase, phase_entries = pick_phase(doc)
+    if phase is None:
+        return
     phase_name = element_name(phase)
     level_name = element_name(level)
     name = model.view_name(VIEW_PREFIX, level_name, phase_name)
@@ -385,6 +568,8 @@ def run():
 
     tally = model.Tally()
     cleared = 0
+    curves = 0
+    notes = []
 
     transaction = DB.Transaction(doc, TITLE)
     transaction.Start()
@@ -395,6 +580,11 @@ def run():
             view.Name = name
         else:
             cleared = clear_view(doc, view)
+
+        notes.extend(make_marks_visible(doc, view))
+        phase_note = set_view_phase(view, phase)
+        if phase_note:
+            notes.append(phase_note)
 
         try:
             scale = view.Scale
@@ -427,7 +617,8 @@ def run():
             colour = model.STATE_COLOURS[state]
             for key in ("shaft", "head_left", "head_right"):
                 start, end = arrow[key]
-                draw_line(doc, view, z, start, end, colour)
+                if draw_line(doc, view, z, start, end, colour) is not None:
+                    curves += 1
 
             to_label, from_label = model.label_for(
                 state, room_label(to_room), room_label(from_room))
@@ -451,7 +642,8 @@ def run():
             title=TITLE)
         return
 
-    report(tally, level_name, phase_name, name, cleared)
+    report(tally, level_name, phase_name, name, cleared,
+           curves, notes, phase_entries)
 
     try:
         uidoc = revit.uidoc
