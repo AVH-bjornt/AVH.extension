@@ -15,12 +15,14 @@ delete it. Isolate Warnings isolates everything Revit has a warning
 about, and clears the isolate on the next click.
 
 **Data.** Room Data Sync copies each room's CCI location ID onto the
-furniture, casework, doors and equipment inside it.
+furniture, casework, doors and equipment inside it. Flip Status records
+whether each family instance is mirrored or flipped into parameters that
+can be scheduled and filtered.
 
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.13.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.14.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -439,6 +441,56 @@ hiding them.
 Point clouds are a fourth switch (`ArePointCloudsHidden`) and are
 deliberately left alone, because nobody has asked for it.
 
+**AVH > Data > Flip Status**
+
+Records whether each family instance is mirrored or flipped, into
+parameters that can be scheduled and filtered. Revit knows all three
+facts and will not let you schedule or filter on any of them.
+
+Three Area parameters, on Casework, Doors, Electrical Equipment, Generic
+Models, Mechanical Equipment and Windows:
+
+| Parameter | Source |
+| --- | --- |
+| `ElementFlippedOrMirrored` | `FamilyInstance.Mirrored` |
+| `ElementHandFlipped` | `FamilyInstance.HandFlipped` |
+| `ElementFacingFlipped` | `FamilyInstance.FacingFlipped` |
+
+`1 SF` for true, `0 SF` for false.
+
+**Why Area and not Yes/No.** An Area parameter can be set to vary across
+group instances, so two instances of the same group can hold different
+values, which is exactly the case that matters: a door mirrored in one
+group instance and not in another. It can also be used in formulas,
+which is what makes it usable in schedules and view filters.
+
+**The first parameter name and its values match Engipedia's add in**, on
+purpose, so a schedule already built on theirs keeps working. The other
+two are what that add in never recorded. It reads `Mirrored` alone and
+never touches `HandFlipped` or `FacingFlipped`, which was confirmed by
+reading the assembly: neither property appears anywhere in it. A facing
+flipped door therefore looks correct to it.
+
+**Report only.** Nothing here creates or binds a parameter. A parameter
+that is missing, is not an Area, is read only, or does not vary across
+group instances is reported with the category and the parameter named,
+and those elements are skipped. `VariesAcrossGroups` is read and
+reported, never set. The one exception is that a parameter which does
+not vary across groups is still written, because the value is correct
+for everything outside a group and refusing would help nobody.
+
+**Only what changed is written.** A value already correct is left alone,
+and the report counts updated and already correct separately. Rewriting
+the same number onto every element marks the whole model as modified,
+which on a workshared job turns a check into a sync. Running it twice in
+a row must write nothing the second time, and three checks in the
+harness say so.
+
+**First thing to check in Revit**: whether `Mirrored` is already true for
+a hand flipped instance. If it is, the mirrored and hand columns will
+agree everywhere and one of them is redundant. That is a question about
+Revit's behaviour that no test outside Revit can answer.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -477,7 +529,8 @@ not in this code at all.
 | 2.11.1 | Door fallback keyed on the value rather than the room | Worked |
 | 2.12.0 | Forma panel: Make Forma View | Worked, first time |
 | 2.12.1 | Imported categories switched off too | Shipped, imports untested in Revit |
-| 2.13.0 | Tools panel: Isolate Warnings | Current, **untested in Revit** |
+| 2.13.0 | Tools panel: Isolate Warnings | Shipped, untested in Revit |
+| 2.14.0 | Data panel: Flip Status | Current, **untested in Revit** |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -653,6 +706,8 @@ AVH.extension/
     model.py    view naming rules and what gets switched off, no Revit
   lib/avh_warnings/
     model.py    warning grouping and picker labels, no Revit
+  lib/avh_flips/
+    model.py    flip state to parameter values, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -665,6 +720,7 @@ AVH.extension/
       Isolate Warnings.pushbutton/
     Data.panel/
       Room Data Sync.pushbutton/
+      Flip Status.pushbutton/
     Forma.panel/
       Make Forma View.pushbutton/
 ```
@@ -714,6 +770,7 @@ python test_room_sync.py
 python test_room_sync_harness.py
 python test_forma_view_harness.py
 python test_isolate_warnings_harness.py
+python test_flip_status_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -823,6 +880,25 @@ the dedup inside a warning kind 2, and letting two long descriptions
 truncate onto the same picker label 3. That last one matters more than it
 sounds: two collided labels means picking one kind silently isolates the
 other.
+
+`test_flip_status_harness.py` runs the **real** Flip Status script
+against a mocked Revit, 52 checks. Its fake parameters keep their values
+across a run, so the test that matters most is possible at all: running
+twice must write nothing the second time. It also covers a parameter
+missing, of the wrong type, read only, not varying across groups, an
+older API with no `GetDataType`, a `Set` that returns false, a `Set` that
+raises the way a workshared element does, a commit Revit rolls back, a
+family document, a category absent from this Revit, and a flip property
+that will not answer.
+
+Every rule is mutation tested. Writing regardless of the current value
+fails 4 checks, comparing the doubles with `!=` instead of a tolerance 1,
+skipping the Area type check 2, ignoring read only 2, ignoring what `Set`
+returns 2, ignoring the commit status 2, never checking
+`VariesAcrossGroups` 1, treating an unreadable flip property as flipped
+1, and running on family documents 2. Cutting it back to `Mirrored`
+alone, which is what Engipedia's add in does, does not fail the suite so
+much as crash it, which is loud enough.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the
