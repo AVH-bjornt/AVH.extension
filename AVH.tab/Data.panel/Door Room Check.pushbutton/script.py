@@ -1,0 +1,459 @@
+# -*- coding: utf-8 -*-
+"""Draw a plan showing which room each door takes its CCI ID from.
+
+Room Data Sync gives a door the ID from its `ToRoom`, and falls back to
+`FromRoom` when the ToRoom has no ID. Which side is which is invisible
+in the model, so a wrong value looks like a bug in the sync when it is
+usually a door facing the wrong way or a room boundary that is missing.
+
+This makes a plan view of one level and draws, at every door, an arrow
+pointing into the ToRoom with the room numbers on both sides. Green
+means the sync got its ID from the ToRoom. Amber and red mean it did
+not, and why.
+
+## What it draws
+
+`ToRoom` is the room on the side the door **faces**, so the arrow is
+just `FamilyInstance.FacingOrientation`. Flip a door's facing and the
+two rooms swap, which is exactly the mistake this view is for finding.
+
+Arrow, head and text are sized in millimetres on paper and multiplied by
+the view scale, so they stay the same size on the sheet at 1:50 or
+1:200. Drawing a fixed model length instead is what makes an annotation
+tool useless on the second project.
+
+## Nothing permanent
+
+Everything drawn is view specific: detail curves and text notes that
+exist only in this view. Delete the view and the marks go with it.
+Running it again on the same level wipes what it drew last time and
+redraws, so the view is always current rather than accumulating.
+
+**It only ever deletes from a view it made itself**, identified by the
+name prefix. A view of any other name is left alone and the run stops.
+
+## Phase
+
+Rooms exist per phase. The view is created on the document's last phase,
+every door is asked about that same phase, and the phase name is part of
+the view name. Room Data Sync asks each element about *its own* phase
+instead, so on a phased model the two can disagree, and this view says
+which phase it used rather than leaving you to guess.
+
+## Unverified
+
+Not yet run in Revit: `ViewPlan.Create`, `NewDetailCurve`,
+`TextNote.Create`, `SetElementOverrides` on detail curves,
+`FamilyInstance.FacingOrientation`, and whether the plan view's `Origin`
+sits at a Z the detail curves will accept. The room lookup itself is the
+same `get_ToRoom(phase)` route Room Data Sync has been running on
+Eldisgarður.
+"""
+
+__title__ = "Door Room\nCheck"
+__author__ = "AVH"
+__doc__ = ("Make a plan of one level with an arrow at every door "
+           "pointing into its ToRoom, room numbers on both sides, and "
+           "the problem doors in red. Rerun to refresh it.")
+
+import os
+import sys
+
+_EXT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+_LIB_DIR = os.path.join(_EXT_DIR, "lib")
+if _LIB_DIR not in sys.path:
+    sys.path.insert(0, _LIB_DIR)
+
+from pyrevit import revit, DB, forms, script      # noqa: E402
+from avh_doorcheck import model                   # noqa: E402
+from avh_schedules.compat import to_text          # noqa: E402
+
+output = script.get_output()
+logger = script.get_logger()
+
+TITLE = u"Door Room Check"
+VIEW_PREFIX = u"AVH Door Rooms"
+
+# The same parameter Room Data Sync reads. If these two ever disagree,
+# this view is lying about what the sync will do.
+SOURCE_PARAM = u"CCIMultiLevelLocationID"
+
+MAX_LISTED = 30
+
+
+def last_phase(doc):
+    try:
+        phases = doc.Phases
+        if phases and phases.Size:
+            return phases[phases.Size - 1]
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+    return None
+
+
+def element_name(element):
+    if element is None:
+        return u""
+    try:
+        return to_text(element.Name)
+    except BaseException:
+        return u""
+
+
+def pick_level(doc):
+    levels = list(DB.FilteredElementCollector(doc).OfClass(DB.Level))
+    if not levels:
+        return None
+
+    def elevation(level):
+        try:
+            return level.Elevation
+        except BaseException:
+            return 0.0
+
+    levels.sort(key=elevation)
+    names = [element_name(level) for level in levels]
+    by_name = {}
+    for level, name in zip(levels, names):
+        by_name.setdefault(name, level)
+
+    if len(levels) == 1:
+        return levels[0]
+
+    chosen = forms.SelectFromList.show(
+        names, multiselect=False, title=TITLE + u": pick a level",
+        button_name="Make the view")
+    if not chosen:
+        return None
+    if isinstance(chosen, list):
+        chosen = chosen[0] if chosen else None
+    return by_name.get(to_text(chosen))
+
+
+def plan_view_type(doc):
+    for view_type in DB.FilteredElementCollector(doc).OfClass(
+            DB.ViewFamilyType):
+        try:
+            if view_type.ViewFamily == DB.ViewFamily.FloorPlan:
+                return view_type
+        except BaseException:
+            continue
+    return None
+
+
+def find_view(doc, name):
+    for view in DB.FilteredElementCollector(doc).OfClass(DB.ViewPlan):
+        try:
+            if view.IsTemplate:
+                continue
+        except BaseException:
+            continue
+        if element_name(view) == name:
+            return view
+    return None
+
+
+def text_note_type(doc):
+    for note_type in DB.FilteredElementCollector(doc).OfClass(
+            DB.TextNoteType):
+        return note_type
+    return None
+
+
+def clear_view(doc, view):
+    """Delete what a previous run drew. Returns how many went.
+
+    Only ever called on a view this tool made, checked by name before
+    anything is deleted. Deleting view specific annotation out of
+    somebody else's plan would be a very expensive bug.
+    """
+    if not element_name(view).startswith(VIEW_PREFIX):
+        return 0
+
+    from System.Collections.Generic import List
+
+    ids = List[DB.ElementId]()
+    count = 0
+    for cls in (DB.CurveElement, DB.TextNote):
+        try:
+            collector = DB.FilteredElementCollector(doc, view.Id).OfClass(cls)
+            for element in collector:
+                ids.Add(element.Id)
+                count += 1
+        except BaseException as exc:
+            logger.debug(to_text(exc))
+
+    if count:
+        try:
+            doc.Delete(ids)
+        except BaseException as exc:
+            logger.debug(to_text(exc))
+            return 0
+    return count
+
+
+def doors_on(doc, level_id):
+    doors = []
+    collector = DB.FilteredElementCollector(doc)
+    collector = collector.OfCategory(DB.BuiltInCategory.OST_Doors)
+    collector = collector.WhereElementIsNotElementType()
+    for door in collector:
+        try:
+            if door.LevelId == level_id:
+                doors.append(door)
+        except BaseException:
+            continue
+    return doors
+
+
+def room_on(door, side, phase):
+    """`side` is "ToRoom" or "FromRoom". Same route as Room Data Sync."""
+    getter = getattr(door, "get_" + side, None)
+    if getter is not None and phase is not None:
+        try:
+            room = getter(phase)
+            if room is not None:
+                return room
+        except BaseException:
+            pass
+    return getattr(door, side, None)
+
+
+def room_value(room):
+    if room is None:
+        return u""
+    try:
+        parameter = room.LookupParameter(SOURCE_PARAM)
+        if parameter is None:
+            return u""
+        return to_text(parameter.AsString())
+    except BaseException:
+        return u""
+
+
+def room_label(room):
+    if room is None:
+        return u""
+    number = u""
+    try:
+        parameter = room.LookupParameter(u"Number")
+        if parameter is not None:
+            number = to_text(parameter.AsString())
+    except BaseException:
+        pass
+    return number or element_name(room)
+
+
+def same_room(first, second):
+    if first is None or second is None:
+        return False
+    try:
+        return first.Id == second.Id
+    except BaseException:
+        return False
+
+
+def door_origin(door):
+    try:
+        point = getattr(door.Location, "Point", None)
+        if point is not None:
+            return (point.X, point.Y)
+    except BaseException:
+        pass
+    return None
+
+
+def facing_of(door):
+    try:
+        facing = door.FacingOrientation
+        return (facing.X, facing.Y)
+    except BaseException:
+        return None
+
+
+def draw_line(doc, view, z, start, end, colour):
+    line = DB.Line.CreateBound(DB.XYZ(start[0], start[1], z),
+                               DB.XYZ(end[0], end[1], z))
+    curve = doc.Create.NewDetailCurve(view, line)
+    try:
+        overrides = DB.OverrideGraphicSettings()
+        revit_colour = DB.Color(colour[0], colour[1], colour[2])
+        overrides.SetProjectionLineColor(revit_colour)
+        overrides.SetProjectionLineWeight(4)
+        view.SetElementOverrides(curve.Id, overrides)
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+    return curve
+
+
+def draw_text(doc, view, z, point, text, type_id):
+    if not text or type_id is None:
+        return None
+    try:
+        return DB.TextNote.Create(doc, view.Id,
+                                  DB.XYZ(point[0], point[1], z),
+                                  text, type_id)
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return None
+
+
+def view_plane_z(view, level):
+    try:
+        origin = view.Origin
+        if origin is not None:
+            return origin.Z
+    except BaseException:
+        pass
+    try:
+        return level.Elevation
+    except BaseException:
+        return 0.0
+
+
+def report(tally, level_name, phase_name, view_label, cleared):
+    output.print_md(u"### {0}".format(TITLE))
+    output.print_md(u"**{0}**, {1} door(s), phase {2}.".format(
+        view_label, tally.total(), phase_name or u"unknown"))
+    if cleared:
+        output.print_md(u"_Refreshed: {0} mark(s) from the last run "
+                        u"removed._".format(cleared))
+
+    for label, count in tally.rows():
+        output.print_md(u"- {0}: **{1}**".format(label, count))
+
+    if tally.problems:
+        output.print_md(u"#### Doors to look at")
+        for state, element_id, description in tally.problems[:MAX_LISTED]:
+            output.print_md(u"- {0} {1} {2}".format(
+                output.linkify(element_id), description,
+                model.STATE_LABELS[state]))
+        if len(tally.problems) > MAX_LISTED:
+            output.print_md(u"- _and {0} more_".format(
+                len(tally.problems) - MAX_LISTED))
+
+
+def run():
+    doc = revit.doc
+    if doc is None:
+        forms.alert(u"No active Revit document.", title=TITLE)
+        return
+    if doc.IsFamilyDocument:
+        forms.alert(u"This works on a project, not on a family document.",
+                    title=TITLE)
+        return
+
+    level = pick_level(doc)
+    if level is None:
+        return
+
+    phase = last_phase(doc)
+    phase_name = element_name(phase)
+    level_name = element_name(level)
+    name = model.view_name(VIEW_PREFIX, level_name, phase_name)
+
+    doors = doors_on(doc, level.Id)
+    if not doors:
+        forms.alert(u"No doors were found on {0}.".format(level_name),
+                    title=TITLE)
+        return
+
+    existing = find_view(doc, name)
+    view_type = None
+    if existing is None:
+        view_type = plan_view_type(doc)
+        if view_type is None:
+            forms.alert(u"This model has no floor plan view type.",
+                        title=TITLE)
+            return
+
+    note_type = text_note_type(doc)
+    if note_type is None:
+        forms.alert(
+            u"This model has no text note type, so the room numbers "
+            u"cannot be written. The arrows alone would say which side "
+            u"is which, but not which room, so nothing was drawn.",
+            title=TITLE)
+        return
+
+    tally = model.Tally()
+    cleared = 0
+
+    transaction = DB.Transaction(doc, TITLE)
+    transaction.Start()
+    try:
+        view = existing
+        if view is None:
+            view = DB.ViewPlan.Create(doc, view_type.Id, level.Id)
+            view.Name = name
+        else:
+            cleared = clear_view(doc, view)
+
+        try:
+            scale = view.Scale
+        except BaseException:
+            scale = 100
+        z = view_plane_z(view, level)
+
+        for door in doors:
+            to_room = room_on(door, "ToRoom", phase)
+            from_room = room_on(door, "FromRoom", phase)
+            state = model.classify(
+                to_room is not None, from_room is not None,
+                room_value(to_room), room_value(from_room),
+                same_room(to_room, from_room))
+
+            description = u"{0} {1}".format(
+                to_text(getattr(door, "Name", u"")) or u"door",
+                room_label(to_room) or u"")
+            tally.add(state, door.Id, description.strip())
+
+            origin = door_origin(door)
+            facing = facing_of(door)
+            if origin is None or facing is None:
+                continue
+
+            arrow = model.arrow_points(origin, facing, scale)
+            if arrow is None:
+                continue
+
+            colour = model.STATE_COLOURS[state]
+            for key in ("shaft", "head_left", "head_right"):
+                start, end = arrow[key]
+                draw_line(doc, view, z, start, end, colour)
+
+            to_label, from_label = model.label_for(
+                state, room_label(to_room), room_label(from_room))
+            draw_text(doc, view, z, arrow["to_text"], to_label, note_type.Id)
+            draw_text(doc, view, z, arrow["from_text"], from_label,
+                      note_type.Id)
+    except BaseException as exc:
+        transaction.RollBack()
+        forms.alert(
+            u"Nothing was drawn. The run stopped with: {0}".format(
+                to_text(exc)),
+            title=TITLE)
+        logger.error(to_text(exc))
+        return
+
+    status = transaction.Commit()
+    if status != DB.TransactionStatus.Committed:
+        forms.alert(
+            u"Revit rejected the changes, so nothing was drawn ({0}).".format(
+                to_text(status)),
+            title=TITLE)
+        return
+
+    report(tally, level_name, phase_name, name, cleared)
+
+    try:
+        uidoc = revit.uidoc
+        if uidoc is not None:
+            uidoc.ActiveView = view
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+
+
+if __name__ == "__main__":
+    run()

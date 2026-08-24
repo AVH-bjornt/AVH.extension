@@ -17,12 +17,13 @@ about, and clears the isolate on the next click.
 **Data.** Room Data Sync copies each room's CCI location ID onto the
 furniture, casework, doors and equipment inside it. Flip Status records
 whether each family instance is mirrored or flipped into parameters that
-can be scheduled and filtered.
+can be scheduled and filtered. Door Room Check draws a plan showing
+which room each door actually takes its ID from.
 
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.14.1.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.15.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -515,6 +516,50 @@ a hand flipped instance. If it is, the mirrored and hand columns will
 agree everywhere and one of them is redundant. That is a question about
 Revit's behaviour that no test outside Revit can answer.
 
+**AVH > Data > Door Room Check**
+
+Makes a plan of one level showing which room each door actually takes its
+CCI ID from. Pick a level, and every door gets an arrow pointing into its
+`ToRoom`, with the room numbers on both sides.
+
+Green means Room Data Sync got the ID from the ToRoom, the normal case.
+Amber and red mean it did not, and the arrow colour says why: ToRoom
+blank so it fell through to FromRoom, no ToRoom at all, both sides the
+same room, no room on either side, or rooms on both sides with no ID
+anywhere.
+
+**Which side is which is invisible in the model**, which is why a wrong
+value looks like a bug in the sync when it is usually a door facing the
+wrong way or a room boundary that is missing. `ToRoom` is the room on the
+side the door **faces**, so the arrow is `FacingOrientation`. Flip a
+door's facing and the two rooms swap, which is exactly the mistake this
+view finds.
+
+**The preference rule is not restated here.** It comes from
+`avh_rooms.model.choose_source`, the same function Room Data Sync uses,
+so the drawing cannot disagree with the sync about which room wins.
+
+Nothing permanent is created. The arrows and text are view specific
+detail curves and text notes that live only in this view, so deleting the
+view deletes the marks. Running it again on the same level wipes what it
+drew last time and redraws.
+
+Sizes are millimetres on paper multiplied by the view scale, so the marks
+stay the same size on the sheet at 1:50 or 1:200. Drawing a fixed model
+length instead is what makes an annotation tool useless on the second
+project.
+
+**Phase.** Rooms exist per phase. The view is made on the document's last
+phase, every door is asked about that same phase, and the phase name is
+part of the view name. Room Data Sync asks each element about *its own*
+phase, so on a phased model the two can disagree, and this view says
+which phase it used rather than leaving you to guess.
+
+**Ownership is the view name**, `AVH Door Rooms - <level> - <phase>`. A
+view of any other name is never found, so it is never cleared and never
+drawn into. Name your own plan exactly that and it will be refreshed,
+which is the one case worth knowing about.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -555,7 +600,8 @@ not in this code at all.
 | 2.12.1 | Imported categories switched off too | Shipped, imports untested in Revit |
 | 2.13.0 | Tools panel: Isolate Warnings | Shipped, untested in Revit |
 | 2.14.0 | Data panel: Flip Status | Ran into the ungroup dialog on Eldisgarður |
-| 2.14.1 | Grouped elements handled instead of walked into | Current |
+| 2.14.1 | Grouped elements handled instead of walked into | Shipped |
+| 2.15.0 | Data panel: Door Room Check | Current, **untested in Revit** |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -733,6 +779,8 @@ AVH.extension/
     model.py    warning grouping and picker labels, no Revit
   lib/avh_flips/
     model.py    flip state to parameter values, no Revit
+  lib/avh_doorcheck/
+    model.py    door states, arrow geometry and view naming, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -746,6 +794,7 @@ AVH.extension/
     Data.panel/
       Room Data Sync.pushbutton/
       Flip Status.pushbutton/
+      Door Room Check.pushbutton/
     Forma.panel/
       Make Forma View.pushbutton/
 ```
@@ -796,6 +845,7 @@ python test_room_sync_harness.py
 python test_forma_view_harness.py
 python test_isolate_warnings_harness.py
 python test_flip_status_harness.py
+python test_door_room_check_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -945,6 +995,38 @@ working code look broken. This one modelled no groups at all, so nothing
 in it could ever refuse a write for the reason Revit does, and a tool
 that walks into an unignorable error looked fully covered. A mock that
 cannot fail the way production fails is not a test of that failure.
+
+`test_door_room_check_harness.py` runs the **real** Door Room Check
+script against a mocked Revit, 71 checks. The arrow geometry is checked
+as arithmetic in every direction, including diagonal, because an arrow
+pointing at the wrong room is a drawing that lies quietly. The rest
+covers the six door states, rerunning without doubling the marks, a view
+the tool did not make being left alone, a level picker cancelled, no
+doors, no text note type, a family document, and a commit Revit rolls
+back.
+
+Mutation tested. Reversing the arrow fails 9 checks, drawing at a fixed
+model size instead of scaling to the view 2, never clearing the previous
+run 4, reusing any plan view rather than ours by name 1, preferring the
+unphased room over the phased one 1, treating a blank ToRoom as fine 4,
+missing the both-sides-same-room case 3, and collecting doors from every
+level 2.
+
+**Two of those checks started out as decoration and had to be rebuilt.**
+A prefix guard inside the cleanup could never fire, since the only view
+ever passed to it was the one found by that exact name, so removing it
+changed nothing: it is gone, and ownership now lives in one place. And
+the foreign view scenario passed under mutation for the wrong reason,
+because a run that threw and rolled back restored the annotation it would
+otherwise have deleted. Asserting only that nothing was destroyed is not
+enough; the positive has to be asserted beside it.
+
+The mock was also wrong twice here, both times in the direction that
+hides bugs rather than invents them. `DB.TextNote` was handed to the
+script as a namespace rather than a class, so the cleanup collector
+matched nothing and the missing cleanup looked like a script bug. And a
+door's unphased property returned the same room as its phased getter, so
+dropping the phased route entirely changed no result.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the
