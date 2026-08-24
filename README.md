@@ -23,7 +23,7 @@ which room each door actually takes its ID from.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.15.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.15.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -601,7 +601,8 @@ not in this code at all.
 | 2.13.0 | Tools panel: Isolate Warnings | Shipped, untested in Revit |
 | 2.14.0 | Data panel: Flip Status | Ran into the ungroup dialog on Eldisgarður |
 | 2.14.1 | Grouped elements handled instead of walked into | Shipped |
-| 2.15.0 | Data panel: Door Room Check | Current, **untested in Revit** |
+| 2.15.0 | Data panel: Door Room Check | pyRevit refused three scripts at startup |
+| 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -656,6 +657,36 @@ Python 2 is unforgiving about all of it.
 
 `test_ironpython_compat.py` enforces all three statically, because a hand
 written checklist missed rules 1 and 2 in consecutive releases.
+
+### A fourth, which contradicts the first three: pushbutton scripts are ASCII
+
+Learned at 2.15.1, from pyRevit refusing three buttons at startup:
+
+```
+ERROR [pyrevit.extensions.genericcomps] Error while parsing file:
+...\Make Forma View.pushbutton\script.py
+Error type: UnicodeDecodeError
+```
+
+**pyRevit parses every bundle's `script.py` itself, at startup**, to pull
+out the title and the tooltip, and that parser cannot cope with non-ASCII
+bytes in the file. The `# -*- coding: utf-8 -*-` declaration governs the
+Python interpreter, not pyRevit's own reader, so a file that runs
+perfectly well still fails to load as a button. Three scripts shipped
+with `Björn` and `Eldisgarður` in their module docstrings and all three
+were rejected.
+
+What was observed is narrower than what is now enforced. All three
+failures had their non-ASCII inside the **module docstring**, and
+`ExportSchedule.pushbutton`, whose only non-ASCII sits at line 235 inside
+a function docstring, has never complained. The rule is nonetheless the
+whole file, because "somewhere above the imports" is not something anyone
+can apply by eye at review time, and nothing in a pushbutton script needs
+an accent. Icelandic text belongs in the library modules, which pyRevit
+never parses and which rules 1 to 3 still cover.
+
+`test_ironpython_compat.py` enforces this too, checked by putting
+`Eldisgarður` back into a script and watching it fail.
 
 ## Never ignore what a write returns
 
@@ -853,7 +884,7 @@ installed in the desktop Python you run them with: they load the written
 workbooks back through independent code, which is the point. Nothing
 about that reaches Revit, where openpyxl cannot run at all.
 
-`test_ironpython_compat.py` is 118 static checks that every shipped file
+`test_ironpython_compat.py` is 529 static checks that every shipped file
 can actually run on IronPython 2.7: encoding declarations, u-prefixed
 literals, no f-strings or `open(encoding=)` or bare `str()`, no
 `#! python3`, and a parse of every file under the **Python 2 grammar**
@@ -1015,7 +1046,12 @@ level 2.
 **Two of those checks started out as decoration and had to be rebuilt.**
 A prefix guard inside the cleanup could never fire, since the only view
 ever passed to it was the one found by that exact name, so removing it
-changed nothing: it is gone, and ownership now lives in one place. And
+changed nothing: it is gone as of 2.15.1, and ownership now lives in one
+place. It was described as gone at 2.15.0 while it was still there,
+because the edit that removed it was applied by a script that did not
+check whether its replacement had matched anything, and it had not. The
+tests could not catch that, since the guard was unreachable either way.
+**An edit that is not verified is a claim, not a change.** And
 the foreign view scenario passed under mutation for the wrong reason,
 because a run that threw and rolled back restored the annotation it would
 otherwise have deleted. Asserting only that nothing was destroyed is not

@@ -232,7 +232,7 @@ def exportable_schedules(doc):
 def choose_schedules(doc, uidoc):
     """Which schedules to export. Returns (list, how).
 
-    Tries pyrevit.forms for a multi select picker, which is what Björn
+    Tries pyrevit.forms for a multi select picker, which is what Bjorn
     originally asked for and which works on IronPython. If anything about
     it fails, falls back to the active schedule view, so a UI problem can
     never cost the export. That fallback is the whole of what v1.0.4 to

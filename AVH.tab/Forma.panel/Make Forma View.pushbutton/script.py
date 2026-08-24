@@ -34,7 +34,7 @@ categories.
 
 ## Verified, and not
 
-Confirmed working on Björn's machine at 2.12.0, against Eldisgarður:
+Confirmed working on Bjorn's machine at 2.12.0, against Eldisgardur:
 `View3D.CreateIsometric`, the annotation and analytical setters,
 `SetCategoryHidden`, `CanCategoryBeHidden` and the naming.
 

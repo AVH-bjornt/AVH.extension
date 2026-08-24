@@ -210,6 +210,45 @@ except ImportError:
                     "skipped"))
 
 
+# --- rule 5: a pushbutton script must be pure ASCII --------------------
+#
+# Learned on 24 Aug 2026, from pyRevit refusing three buttons at startup:
+#
+#   ERROR [pyrevit.extensions.genericcomps] Error while parsing file:
+#   ...\Make Forma View.pushbutton\script.py
+#   Error type: UnicodeDecodeError
+#
+# pyRevit parses every bundle's script.py itself, at startup, to pull out
+# the title and tooltip, and that parser cannot cope with non-ASCII bytes
+# in the file. The `# -*- coding: utf-8 -*-` declaration governs the
+# Python interpreter, not pyRevit's own reader, so a file that runs
+# perfectly still fails to load as a button.
+#
+# **What was observed** is narrower than what is enforced here: all three
+# failures had their non-ASCII inside the *module docstring*, and
+# ExportSchedule, whose only non-ASCII sits at line 235 in a function
+# docstring, has never complained. The whole file is required to be ASCII
+# anyway, because "somewhere above the imports" is not a rule anyone can
+# apply by eye at review time, and there is nothing in a script that
+# needs an accent: Icelandic text belongs in the library modules, which
+# pyRevit never parses, and those are still checked for u-prefixes above.
+
+for path in SHIPPED:
+    name = os.path.basename(path)
+    if name != "script.py":
+        continue
+    text = read(path)
+    offenders = sorted(set(character for character in text
+                           if ord(character) > 127))
+    lines = [index + 1 for index, line in enumerate(text.splitlines())
+             if any(ord(character) > 127 for character in line)]
+    check("{0}: pushbutton script is pure ASCII".format(rel(path)),
+          not offenders,
+          u"{0} on line(s) {1}".format(u" ".join(offenders),
+                                       u", ".join(str(n) for n in lines[:8]))
+          if offenders else "")
+
+
 # --- report -----------------------------------------------------------
 
 print("IronPython 2.7 compatibility")

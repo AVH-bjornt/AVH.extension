@@ -29,8 +29,9 @@ exist only in this view. Delete the view and the marks go with it.
 Running it again on the same level wipes what it drew last time and
 redraws, so the view is always current rather than accumulating.
 
-**It only ever deletes from a view it made itself**, identified by the
-name prefix. A view of any other name is left alone and the run stops.
+**Ownership is the view name**, `AVH Door Rooms - <level> - <phase>`. A
+view of any other name is never found, so it is never cleared and never
+drawn into.
 
 ## Phase
 
@@ -47,7 +48,7 @@ Not yet run in Revit: `ViewPlan.Create`, `NewDetailCurve`,
 `FamilyInstance.FacingOrientation`, and whether the plan view's `Origin`
 sits at a Z the detail curves will accept. The room lookup itself is the
 same `get_ToRoom(phase)` route Room Data Sync has been running on
-Eldisgarður.
+Eldisgardur.
 """
 
 __title__ = "Door Room\nCheck"
@@ -164,13 +165,18 @@ def text_note_type(doc):
 def clear_view(doc, view):
     """Delete what a previous run drew. Returns how many went.
 
-    Only ever called on a view this tool made, checked by name before
-    anything is deleted. Deleting view specific annotation out of
-    somebody else's plan would be a very expensive bug.
-    """
-    if not element_name(view).startswith(VIEW_PREFIX):
-        return 0
+    **Ownership is the view name, and `find_view` is the only place that
+    decides it.** An earlier version repeated a prefix check here, which
+    could never fire: the only view ever passed in was the one found by
+    that exact name. A check whose result cannot change the outcome is
+    decoration, and this repository has already paid once for treating
+    decoration as a safeguard.
 
+    The real protection is that a view of any other name is never found,
+    so it is never cleared and never drawn into. A human who names their
+    own plan `AVH Door Rooms - E01 - Phase 1` will have it refreshed,
+    which is the one case worth knowing about.
+    """
     from System.Collections.Generic import List
 
     ids = List[DB.ElementId]()
