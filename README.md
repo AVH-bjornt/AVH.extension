@@ -22,7 +22,7 @@ can be scheduled and filtered.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.14.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.14.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -471,13 +471,37 @@ never touches `HandFlipped` or `FacingFlipped`, which was confirmed by
 reading the assembly: neither property appears anywhere in it. A facing
 flipped door therefore looks correct to it.
 
-**Report only.** Nothing here creates or binds a parameter. A parameter
-that is missing, is not an Area, is read only, or does not vary across
-group instances is reported with the category and the parameter named,
-and those elements are skipped. `VariesAcrossGroups` is read and
-reported, never set. The one exception is that a parameter which does
-not vary across groups is still written, because the value is correct
-for everything outside a group and refusing would help nobody.
+**Groups, which 2.14.0 got wrong.** Writing an instance parameter onto
+an element inside a group is a change to the group, unless that
+parameter is flagged to vary across group instances. Revit refuses with
+*"Changes to groups are allowed only in group edit mode"*, an error that
+cannot be ignored, and the only way it offers to proceed is **Ungroup**,
+which dissolves every group instance the run touched.
+
+2.14.0 read `VariesAcrossGroups`, reported that it was off, and wrote
+anyway, reasoning that the value is still right outside groups. That
+reasoning walked a real model into that dialog on the first run. Three
+things now stand between the tool and it:
+
+1. When the flag is off **and elements are actually in groups**, the run
+   offers to set it, naming the parameters. Setting it is its own
+   transaction, committed before anything else is written. A model with
+   no groups gets no dialog about groups.
+2. If the offer is declined, or the flag cannot be set, elements inside
+   groups are skipped and counted. Everything outside a group is still
+   written.
+3. An `IFailuresPreprocessor` on the write transaction rolls the whole
+   run back if that failure appears anyway, so the Ungroup option is
+   never presented. It is inherited alone: mixing it with another base
+   class breaks the method resolution order and the handler silently
+   never runs, which cost a session on Remove Level already.
+
+**Report only otherwise.** Nothing creates or binds a parameter. A
+parameter that is missing, is not an Area, or is read only is reported
+with the category and the parameter named, and those elements are
+skipped. The vary across groups flag on an existing binding is the one
+thing the tool will change, on request, because that is the difference
+between the tool working and the tool being dangerous.
 
 **Only what changed is written.** A value already correct is left alone,
 and the report counts updated and already correct separately. Rewriting
@@ -530,7 +554,8 @@ not in this code at all.
 | 2.12.0 | Forma panel: Make Forma View | Worked, first time |
 | 2.12.1 | Imported categories switched off too | Shipped, imports untested in Revit |
 | 2.13.0 | Tools panel: Isolate Warnings | Shipped, untested in Revit |
-| 2.14.0 | Data panel: Flip Status | Current, **untested in Revit** |
+| 2.14.0 | Data panel: Flip Status | Ran into the ungroup dialog on Eldisgarður |
+| 2.14.1 | Grouped elements handled instead of walked into | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -882,7 +907,7 @@ sounds: two collided labels means picking one kind silently isolates the
 other.
 
 `test_flip_status_harness.py` runs the **real** Flip Status script
-against a mocked Revit, 52 checks. Its fake parameters keep their values
+against a mocked Revit, 78 checks. Its fake parameters keep their values
 across a run, so the test that matters most is possible at all: running
 twice must write nothing the second time. It also covers a parameter
 missing, of the wrong type, read only, not varying across groups, an
@@ -894,11 +919,32 @@ that will not answer.
 Every rule is mutation tested. Writing regardless of the current value
 fails 4 checks, comparing the doubles with `!=` instead of a tolerance 1,
 skipping the Area type check 2, ignoring read only 2, ignoring what `Set`
-returns 2, ignoring the commit status 2, never checking
-`VariesAcrossGroups` 1, treating an unreadable flip property as flipped
-1, and running on family documents 2. Cutting it back to `Mirrored`
-alone, which is what Engipedia's add in does, does not fail the suite so
-much as crash it, which is loud enough.
+returns 2, ignoring the commit status 2, treating an unreadable flip
+property as flipped 1, and running on family documents 2. Cutting it back
+to `Mirrored` alone, which is what Engipedia's add in does, does not fail
+the suite so much as crash it, which is loud enough.
+
+**The group scenarios are there because the first version shipped
+without them.** The fake now models Revit's rule: writing an instance
+parameter onto a grouped element whose parameter does not vary across
+group instances posts a failure, and a transaction that has failures and
+no preprocessor is recorded as having reached the Ungroup dialog.
+`UNGROUP_DIALOG` must be False at the end of every scenario, and there is
+a check at the end of the file that says so.
+
+Restoring 2.14.0's behaviour, writing grouped elements anyway, fails 4
+checks. Never attaching the failure guard fails 3, the guard returning
+`Continue` instead of `ProceedWithRollBack` fails 3, never detecting
+group membership fails 12, setting the flag inside the write transaction
+rather than its own fails 7, and asking about groups in a model that has
+none fails 1.
+
+**This is the fifth time a mock here has been wrong, and the first time
+by omission.** The other four invented state that did not exist and made
+working code look broken. This one modelled no groups at all, so nothing
+in it could ever refuse a write for the reason Revit does, and a tool
+that walks into an unignorable error looked fully covered. A mock that
+cannot fail the way production fails is not a test of that failure.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the

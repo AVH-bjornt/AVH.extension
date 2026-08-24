@@ -4,9 +4,19 @@ Runs the real Flip Status script against a mocked Revit.
 
 The fake parameters hold their values across a run, so the test that
 matters most here is possible at all: running twice must write nothing
-the second time. A tool that rewrites the same number to every element
-on every run marks the whole model as modified, and on a workshared job
-that turns a check into a sync.
+the second time.
+
+It also models groups the way Revit does, which 2.14.0's version did
+not. Writing an instance parameter onto a grouped element whose
+parameter does not vary across group instances posts a failure, and a
+run with no failure preprocessor is recorded as having reached the
+Ungroup dialog. `UNGROUP_DIALOG` must be False at the end of every
+scenario. That omission is why 2.14.0 shipped a tool that offered to
+dissolve Björn's groups.
+
+Writing twice matters for a different reason: a tool that rewrites the
+same number to every element on every run marks the whole model as
+modified, and on a workshared job that turns a check into a sync.
 
 Rollback restores the values captured when the transaction started, so a
 commit Revit rejects genuinely leaves the model alone.
@@ -45,28 +55,42 @@ LENGTH = "SpecTypeId.Length"
 
 
 class FakeDefinition(object):
-    def __init__(self, data_type=AREA, varies=True, has_data_type=True):
+    def __init__(self, data_type=AREA, varies=True, has_data_type=True,
+                 set_vary_raises=False):
         self.data_type = data_type
         self.VariesAcrossGroups = varies
         self.has_data_type = has_data_type
+        self.set_vary_raises = set_vary_raises
+        self.vary_calls = 0
 
     def GetDataType(self):
         if not self.has_data_type:
             raise Exception("GetDataType is not available in this API")
         return self.data_type
 
+    def SetAllowVaryBetweenGroups(self, doc, value):
+        if self.set_vary_raises:
+            raise Exception("the parameter binding is not editable")
+        self.VariesAcrossGroups = bool(value)
+        self.vary_calls += 1
+
 
 class FakeParameter(object):
     def __init__(self, value=0.0, storage="Double", data_type=AREA,
                  read_only=False, varies=True, has_data_type=True,
-                 set_returns=True, set_raises=False):
+                 set_returns=True, set_raises=False,
+                 set_vary_raises=False):
         self.value = value
         self.StorageType = storage
         self.IsReadOnly = read_only
-        self.Definition = FakeDefinition(data_type, varies, has_data_type)
+        self.Definition = FakeDefinition(data_type, varies, has_data_type,
+                                         set_vary_raises)
         self.set_returns = set_returns
         self.set_raises = set_raises
         self.writes = 0
+        # Set when the element builds its parameters, so a write can tell
+        # whether it is editing something inside a group.
+        self.element = None
 
     def AsDouble(self):
         return self.value
@@ -76,9 +100,41 @@ class FakeParameter(object):
             raise Exception("the element is owned by another user")
         if not self.set_returns:
             return False
+        # Revit's own rule: changing an instance parameter inside a group
+        # is a change to the group unless the parameter varies across
+        # group instances. The failure is posted, not raised.
+        if (self.element is not None and self.element.grouped and
+                not self.Definition.VariesAcrossGroups):
+            FAILURES.append(
+                u"Changes to groups are allowed only in group edit mode.")
         self.value = value
         self.writes += 1
         return True
+
+
+class FakeId(object):
+    def __init__(self, value):
+        self.Value = value
+
+    def __eq__(self, other):
+        return isinstance(other, FakeId) and other.Value == self.Value
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash(self.Value)
+
+
+INVALID_ID = FakeId(-1)
+
+# Posted by a write Revit would refuse, and drained by the transaction.
+FAILURES = []
+
+# Set when a transaction with failures had no preprocessor to catch them,
+# which is the moment Revit would show the user the Ungroup dialog. It
+# must never be True.
+UNGROUP_DIALOG = [False]
 
 
 class FakeCategory(object):
@@ -88,8 +144,10 @@ class FakeCategory(object):
 
 class FakeElement(object):
     def __init__(self, category, mirrored=False, hand=False, facing=False,
-                 parameters=None, missing=(), raises_on=()):
+                 parameters=None, missing=(), raises_on=(), grouped=False):
         self.Category = FakeCategory(category)
+        self.grouped = grouped
+        self.GroupId = FakeId(77) if grouped else INVALID_ID
         self._state = {"Mirrored": mirrored, "HandFlipped": hand,
                        "FacingFlipped": facing}
         self.raises_on = set(raises_on)
@@ -101,6 +159,7 @@ class FakeElement(object):
                 self.parameters[name] = parameters[name]
             else:
                 self.parameters[name] = FakeParameter()
+            self.parameters[name].element = self
 
     def _read(self, attribute):
         if attribute in self.raises_on:
@@ -152,6 +211,39 @@ class FakeDocument(object):
             element.restore(values)
 
 
+class FakeFailureMessage(object):
+    def __init__(self, text):
+        self.text = text
+
+    def GetDescriptionText(self):
+        return self.text
+
+
+class FakeFailuresAccessor(object):
+    def __init__(self, messages):
+        self.messages = messages
+
+    def GetFailureMessages(self):
+        return [FakeFailureMessage(text) for text in self.messages]
+
+    def GetSeverity(self):
+        return "Error"
+
+
+class FakeFailureOptions(object):
+    def __init__(self):
+        self.preprocessor = None
+        self.clear_after_rollback = False
+
+    def SetFailuresPreprocessor(self, preprocessor):
+        self.preprocessor = preprocessor
+        return self
+
+    def SetClearAfterRollback(self, value):
+        self.clear_after_rollback = bool(value)
+        return self
+
+
 class FakeTransaction(object):
     committed = []
     rolled_back = []
@@ -161,11 +253,38 @@ class FakeTransaction(object):
         self.doc = doc
         self.name = name
         self.state = None
+        self.options = FakeFailureOptions()
+
+    def GetFailureHandlingOptions(self):
+        return self.options
+
+    def SetFailureHandlingOptions(self, options):
+        self.options = options
 
     def Start(self):
         self.state = self.doc.snapshot()
+        del FAILURES[:]
 
     def Commit(self):
+        # Failures posted during the transaction are resolved at commit.
+        # With no preprocessor Revit puts the dialog in front of the user,
+        # which is the thing this tool must never do.
+        if FAILURES:
+            messages = list(FAILURES)
+            del FAILURES[:]
+            preprocessor = self.options.preprocessor
+            if preprocessor is None:
+                UNGROUP_DIALOG[0] = True
+                self.doc.restore(self.state)
+                FakeTransaction.rolled_back.append(self.name)
+                return "RolledBack"
+            result = preprocessor.PreprocessFailures(
+                FakeFailuresAccessor(messages))
+            if result == "ProceedWithRollBack":
+                self.doc.restore(self.state)
+                FakeTransaction.rolled_back.append(self.name)
+                return "RolledBack"
+
         if FakeTransaction.commit_status != "Committed":
             self.doc.restore(self.state)
             FakeTransaction.rolled_back.append(self.name)
@@ -174,6 +293,7 @@ class FakeTransaction(object):
         return "Committed"
 
     def RollBack(self):
+        del FAILURES[:]
         self.doc.restore(self.state)
         FakeTransaction.rolled_back.append(self.name)
         return "RolledBack"
@@ -251,9 +371,14 @@ class Recorder(object):
     def __init__(self):
         self.alerts = []
         self.printed = []
+        self.questions = []
+        self.answers = []
 
     def alert(self, message, **kwargs):
         self.alerts.append(message)
+        if kwargs.get("yes") or kwargs.get("no"):
+            self.questions.append(message)
+            return self.answers.pop(0) if self.answers else False
         return None
 
     def print_md(self, text):
@@ -263,12 +388,15 @@ class Recorder(object):
         return u"\n".join(self.alerts + self.printed)
 
 
-def run_script(doc, commit_status="Committed", missing_from_enum=()):
+def run_script(doc, commit_status="Committed", missing_from_enum=(),
+               answers=()):
     FakeTransaction.committed = []
     FakeTransaction.rolled_back = []
     FakeTransaction.commit_status = commit_status
+    del FAILURES[:]
 
     recorder = Recorder()
+    recorder.answers = list(answers)
     install_dotnet()
 
     built_in = Namespace(**dict(
@@ -286,6 +414,12 @@ def run_script(doc, commit_status="Committed", missing_from_enum=()):
         StorageType=Namespace(Double="Double", Integer="Integer",
                               String="String"),
         SpecTypeId=Namespace(Area=AREA, Length=LENGTH),
+        ElementId=Namespace(InvalidElementId=INVALID_ID),
+        IFailuresPreprocessor=object,
+        FailureProcessingResult=Namespace(
+            Continue="Continue",
+            ProceedWithRollBack="ProceedWithRollBack"),
+        FailureSeverity=Namespace(Error="Error", Warning="Warning"),
     )
 
     pyrevit = types.ModuleType("pyrevit")
@@ -444,16 +578,123 @@ check("no GetDataType: still written on the storage type alone",
 check("no GetDataType: not reported as a problem",
       u"not an Area parameter" not in recorder.text())
 
-# Not varying across groups: reported, but still written, because the
-# value is right for everything that is not in a group.
+# A model with no groups is not made better by a dialog about groups.
 door = FakeElement(u"Doors", mirrored=True, parameters={
     model.MIRRORED: FakeParameter(varies=False)})
 doc = FakeDocument([door])
 recorder = run_script(doc)
-check("not varying across groups: reported",
-      u"does not vary across group instances" in recorder.text())
-check("not varying across groups: written anyway",
+check("no groups in the model: not asked about the vary flag",
+      not recorder.questions, u" | ".join(recorder.questions))
+check("no groups in the model: written normally",
       door.values()[model.MIRRORED] == 1.0)
+
+
+# --------------------------------------------------------------------------
+# 3b. Groups, which is what 2.14.0 walked into
+# --------------------------------------------------------------------------
+
+def grouped_model():
+    """One grouped door and one loose door, sharing a definition state."""
+    parameters = dict(
+        (name, FakeParameter(varies=False))
+        for name, _key, _label in model.PARAMETERS)
+    grouped = FakeElement(u"Doors", mirrored=True, grouped=True,
+                          parameters=parameters)
+    loose = FakeElement(u"Doors", mirrored=True)
+    return grouped, loose, FakeDocument([grouped, loose])
+
+
+# Answering yes sets the flag, and then everything is written.
+grouped, loose, doc = grouped_model()
+recorder = run_script(doc, answers=[True])
+definition = grouped.parameters[model.MIRRORED].Definition
+
+check("grouped, yes: the user was asked once", len(recorder.questions) == 1,
+      str(len(recorder.questions)))
+check("grouped, yes: the question names the parameters",
+      model.MIRRORED in recorder.questions[0] if recorder.questions else False)
+check("grouped, yes: the flag was set", definition.VariesAcrossGroups)
+check("grouped, yes: in its own transaction before the write",
+      len(FakeTransaction.committed) == 2, str(FakeTransaction.committed))
+check("grouped, yes: the grouped element was written",
+      grouped.values()[model.MIRRORED] == 1.0)
+check("grouped, yes: the loose element was written",
+      loose.values()[model.MIRRORED] == 1.0)
+check("grouped, yes: the report says the flag was switched on",
+      u"Vary across group instances was switched on" in recorder.text())
+check("grouped, yes: no ungroup dialog", not UNGROUP_DIALOG[0])
+
+# Answering no skips the grouped elements and writes the rest.
+grouped, loose, doc = grouped_model()
+recorder = run_script(doc, answers=[False])
+definition = grouped.parameters[model.MIRRORED].Definition
+
+check("grouped, no: the flag is left alone", not definition.VariesAcrossGroups)
+check("grouped, no: the grouped element is not written",
+      grouped.values()[model.MIRRORED] == 0.0)
+check("grouped, no: the loose element is still written",
+      loose.values()[model.MIRRORED] == 1.0)
+check("grouped, no: the skip is counted and explained",
+      u"inside groups were skipped" in recorder.text(), recorder.text()[-400:])
+check("grouped, no: committed", len(FakeTransaction.committed) == 1)
+check("grouped, no: no ungroup dialog", not UNGROUP_DIALOG[0])
+
+# The flag already on: no question, everything written.
+parameters = dict((name, FakeParameter(varies=True))
+                  for name, _key, _label in model.PARAMETERS)
+grouped = FakeElement(u"Doors", mirrored=True, grouped=True,
+                      parameters=parameters)
+doc = FakeDocument([grouped])
+recorder = run_script(doc)
+check("grouped, flag already on: not asked", not recorder.questions)
+check("grouped, flag already on: written",
+      grouped.values()[model.MIRRORED] == 1.0)
+check("grouped, flag already on: no ungroup dialog", not UNGROUP_DIALOG[0])
+
+# Setting the flag fails: fall back to skipping rather than pressing on.
+parameters = dict(
+    (name, FakeParameter(varies=False, set_vary_raises=True))
+    for name, _key, _label in model.PARAMETERS)
+grouped = FakeElement(u"Doors", mirrored=True, grouped=True,
+                      parameters=parameters)
+loose = FakeElement(u"Doors", mirrored=True)
+doc = FakeDocument([grouped, loose])
+recorder = run_script(doc, answers=[True])
+
+check("flag cannot be set: the user is told",
+      u"could not be set" in recorder.text(), u" | ".join(recorder.alerts))
+check("flag cannot be set: the grouped element is skipped, not forced",
+      grouped.values()[model.MIRRORED] == 0.0)
+check("flag cannot be set: the loose element is still written",
+      loose.values()[model.MIRRORED] == 1.0)
+check("flag cannot be set: no ungroup dialog", not UNGROUP_DIALOG[0])
+
+# The guard itself: a group failure that gets past every check must roll
+# the run back rather than reach the user. Modelled by a definition that
+# claims to vary and refuses anyway, which is what a nested group or an
+# attached detail group can do.
+class LyingParameter(FakeParameter):
+    def Set(self, value):
+        FAILURES.append(
+            u"Changes to groups are allowed only in group edit mode.")
+        self.value = value
+        self.writes += 1
+        return True
+
+
+parameters = dict((name, LyingParameter(varies=True))
+                  for name, _key, _label in model.PARAMETERS)
+grouped = FakeElement(u"Doors", mirrored=True, grouped=True,
+                      parameters=parameters)
+doc = FakeDocument([grouped])
+recorder = run_script(doc)
+
+check("guard: the run was rolled back", len(FakeTransaction.rolled_back) == 1)
+check("guard: nothing was written",
+      grouped.values()[model.MIRRORED] == 0.0)
+check("guard: Revit's own words reach the user",
+      u"group edit mode" in recorder.text(), recorder.text()[-300:])
+check("guard: the ungroup dialog was never reached", not UNGROUP_DIALOG[0])
 
 
 # --------------------------------------------------------------------------
@@ -536,6 +777,8 @@ check("unreadable flip property: the rest of the element still written",
 
 
 # --------------------------------------------------------------------------
+
+check("no scenario ever reached the ungroup dialog", not UNGROUP_DIALOG[0])
 
 failed = [entry for entry in results if not entry[1]]
 for name, ok, detail in results:
