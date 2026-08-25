@@ -34,7 +34,7 @@ categories.
 
 ## Verified, and not
 
-Confirmed working on Björn's machine at 2.12.0, against Eldisgarður:
+Confirmed working on Bjorn's machine at 2.12.0, against Eldisgardur:
 `View3D.CreateIsometric`, the annotation and analytical setters,
 `SetCategoryHidden`, `CanCategoryBeHidden` and the naming.
 
@@ -59,8 +59,16 @@ __doc__ = ("Create or refresh a 3D view named after the model, with "
 import os
 import sys
 
-_EXT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__)))))
+# Walk up until the extension root turns up, rather than counting
+# directory levels. A button nested one deeper, in a pulldown, was enough
+# to break the fixed count, and it breaks at import time with a message
+# about a module nobody has heard of.
+_EXT_DIR = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isdir(os.path.join(_EXT_DIR, "lib")):
+    _PARENT = os.path.dirname(_EXT_DIR)
+    if _PARENT == _EXT_DIR:
+        break
+    _EXT_DIR = _PARENT
 _LIB_DIR = os.path.join(_EXT_DIR, "lib")
 if _LIB_DIR not in sys.path:
     sys.path.insert(0, _LIB_DIR)

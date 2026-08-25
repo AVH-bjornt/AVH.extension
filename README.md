@@ -15,12 +15,16 @@ delete it. Isolate Warnings isolates everything Revit has a warning
 about, and clears the isolate on the next click.
 
 **Data.** Room Data Sync copies each room's CCI location ID onto the
-furniture, casework, doors and equipment inside it.
+furniture, casework, doors and equipment inside it. Under the **Doors**
+pulldown, Flip Status records whether each family instance is mirrored or
+flipped into parameters that can be scheduled and filtered, and Door Room
+Check draws a plan showing which room each door actually takes its ID
+from.
 
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.13.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.16.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -439,6 +443,139 @@ hiding them.
 Point clouds are a fourth switch (`ArePointCloudsHidden`) and are
 deliberately left alone, because nobody has asked for it.
 
+**AVH > Data > Doors > Flip Status**
+
+Records whether each family instance is mirrored or flipped, into
+parameters that can be scheduled and filtered. Revit knows all three
+facts and will not let you schedule or filter on any of them.
+
+Three Area parameters, on Casework, Doors, Electrical Equipment, Generic
+Models, Mechanical Equipment and Windows:
+
+| Parameter | Source |
+| --- | --- |
+| `ElementFlippedOrMirrored` | `FamilyInstance.Mirrored` |
+| `ElementHandFlipped` | `FamilyInstance.HandFlipped` |
+| `ElementFacingFlipped` | `FamilyInstance.FacingFlipped` |
+
+`1 SF` for true, `0 SF` for false.
+
+**Why Area and not Yes/No.** An Area parameter can be set to vary across
+group instances, so two instances of the same group can hold different
+values, which is exactly the case that matters: a door mirrored in one
+group instance and not in another. It can also be used in formulas,
+which is what makes it usable in schedules and view filters.
+
+**The first parameter name and its values match Engipedia's add in**, on
+purpose, so a schedule already built on theirs keeps working. The other
+two are what that add in never recorded. It reads `Mirrored` alone and
+never touches `HandFlipped` or `FacingFlipped`, which was confirmed by
+reading the assembly: neither property appears anywhere in it. A facing
+flipped door therefore looks correct to it.
+
+**Groups, which 2.14.0 got wrong.** Writing an instance parameter onto
+an element inside a group is a change to the group, unless that
+parameter is flagged to vary across group instances. Revit refuses with
+*"Changes to groups are allowed only in group edit mode"*, an error that
+cannot be ignored, and the only way it offers to proceed is **Ungroup**,
+which dissolves every group instance the run touched.
+
+2.14.0 read `VariesAcrossGroups`, reported that it was off, and wrote
+anyway, reasoning that the value is still right outside groups. That
+reasoning walked a real model into that dialog on the first run. Three
+things now stand between the tool and it:
+
+1. When the flag is off **and elements are actually in groups**, the run
+   offers to set it, naming the parameters. Setting it is its own
+   transaction, committed before anything else is written. A model with
+   no groups gets no dialog about groups.
+2. If the offer is declined, or the flag cannot be set, elements inside
+   groups are skipped and counted. Everything outside a group is still
+   written.
+3. An `IFailuresPreprocessor` on the write transaction rolls the whole
+   run back if that failure appears anyway, so the Ungroup option is
+   never presented. It is inherited alone: mixing it with another base
+   class breaks the method resolution order and the handler silently
+   never runs, which cost a session on Remove Level already.
+
+**Report only otherwise.** Nothing creates or binds a parameter. A
+parameter that is missing, is not an Area, or is read only is reported
+with the category and the parameter named, and those elements are
+skipped. The vary across groups flag on an existing binding is the one
+thing the tool will change, on request, because that is the difference
+between the tool working and the tool being dangerous.
+
+**Only what changed is written.** A value already correct is left alone,
+and the report counts updated and already correct separately. Rewriting
+the same number onto every element marks the whole model as modified,
+which on a workshared job turns a check into a sync. Running it twice in
+a row must write nothing the second time, and three checks in the
+harness say so.
+
+**First thing to check in Revit**: whether `Mirrored` is already true for
+a hand flipped instance. If it is, the mirrored and hand columns will
+agree everywhere and one of them is redundant. That is a question about
+Revit's behaviour that no test outside Revit can answer.
+
+**AVH > Data > Doors > Door Room Check**
+
+Makes a plan of one level showing which room each door actually takes its
+CCI ID from. Pick a level, and every door gets an arrow pointing into its
+`ToRoom`, with the room numbers on both sides.
+
+Green means Room Data Sync got the ID from the ToRoom, the normal case.
+Amber and red mean it did not, and the arrow colour says why: ToRoom
+blank so it fell through to FromRoom, no ToRoom at all, both sides the
+same room, no room on either side, or rooms on both sides with no ID
+anywhere.
+
+**Which side is which is invisible in the model**, which is why a wrong
+value looks like a bug in the sync when it is usually a door facing the
+wrong way or a room boundary that is missing. `ToRoom` is the room on the
+side the door **faces**, so the arrow is `FacingOrientation`. Flip a
+door's facing and the two rooms swap, which is exactly the mistake this
+view finds.
+
+**The preference rule is not restated here.** It comes from
+`avh_rooms.model.choose_source`, the same function Room Data Sync uses,
+so the drawing cannot disagree with the sync about which room wins.
+
+Nothing permanent is created. The arrows and text are view specific
+detail curves and text notes that live only in this view, so deleting the
+view deletes the marks. Running it again on the same level wipes what it
+drew last time and redraws.
+
+Sizes are millimetres on paper multiplied by the view scale, so the marks
+stay the same size on the sheet at 1:50 or 1:200. Drawing a fixed model
+length instead is what makes an annotation tool useless on the second
+project.
+
+**Phase, which 2.15.0 got wrong.** Rooms exist per phase, and asking the
+wrong one gives no rooms at all rather than an error. 2.15.0 used the
+document's last phase without asking. On Eldisgarður that is Phase 2, the
+rooms are not in it, and the result was a plan reading "no room" at every
+single door: a confident drawing of nothing.
+
+The phase is now **asked, every run**, with the number of placed rooms in
+each phase on the label, because the phase to pick is whichever one the
+rooms are in and nobody should have to know that in advance. The view is
+then put on that phase, so the drawing cannot disagree with its own
+labels. If every door still comes back with no room and another phase
+does hold rooms, the report names it.
+
+**The arrows that did not draw.** At 2.15.0 the text notes appeared and
+the arrows did not. A text note is an annotation category; a detail line
+lives in the model `Lines` category. A view template on the new view, or
+a hidden `Lines` category, produces exactly that. Both are now corrected
+**and reported**, and the arrow count is in the report, so the next run
+says which it was instead of it taking another screenshot. That part is a
+probe as much as a fix, and it is labelled as one in the script.
+
+**Ownership is the view name**, `AVH Door Rooms - <level> - <phase>`. A
+view of any other name is never found, so it is never cleared and never
+drawn into. Name your own plan exactly that and it will be refreshed,
+which is the one case worth knowing about.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -477,7 +614,13 @@ not in this code at all.
 | 2.11.1 | Door fallback keyed on the value rather than the room | Worked |
 | 2.12.0 | Forma panel: Make Forma View | Worked, first time |
 | 2.12.1 | Imported categories switched off too | Shipped, imports untested in Revit |
-| 2.13.0 | Tools panel: Isolate Warnings | Current, **untested in Revit** |
+| 2.13.0 | Tools panel: Isolate Warnings | Shipped, untested in Revit |
+| 2.14.0 | Data panel: Flip Status | Ran into the ungroup dialog on Eldisgarður |
+| 2.14.1 | Grouped elements handled instead of walked into | Shipped |
+| 2.15.0 | Data panel: Door Room Check | pyRevit refused three scripts at startup |
+| 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Worked |
+| 2.15.2 | Door Room Check: the phase is asked for, not assumed | Worked |
+| 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -532,6 +675,36 @@ Python 2 is unforgiving about all of it.
 
 `test_ironpython_compat.py` enforces all three statically, because a hand
 written checklist missed rules 1 and 2 in consecutive releases.
+
+### A fourth, which contradicts the first three: pushbutton scripts are ASCII
+
+Learned at 2.15.1, from pyRevit refusing three buttons at startup:
+
+```
+ERROR [pyrevit.extensions.genericcomps] Error while parsing file:
+...\Make Forma View.pushbutton\script.py
+Error type: UnicodeDecodeError
+```
+
+**pyRevit parses every bundle's `script.py` itself, at startup**, to pull
+out the title and the tooltip, and that parser cannot cope with non-ASCII
+bytes in the file. The `# -*- coding: utf-8 -*-` declaration governs the
+Python interpreter, not pyRevit's own reader, so a file that runs
+perfectly well still fails to load as a button. Three scripts shipped
+with `Björn` and `Eldisgarður` in their module docstrings and all three
+were rejected.
+
+What was observed is narrower than what is now enforced. All three
+failures had their non-ASCII inside the **module docstring**, and
+`ExportSchedule.pushbutton`, whose only non-ASCII sits at line 235 inside
+a function docstring, has never complained. The rule is nonetheless the
+whole file, because "somewhere above the imports" is not something anyone
+can apply by eye at review time, and nothing in a pushbutton script needs
+an accent. Icelandic text belongs in the library modules, which pyRevit
+never parses and which rules 1 to 3 still cover.
+
+`test_ironpython_compat.py` enforces this too, checked by putting
+`Eldisgarður` back into a script and watching it fail.
 
 ## Never ignore what a write returns
 
@@ -653,6 +826,10 @@ AVH.extension/
     model.py    view naming rules and what gets switched off, no Revit
   lib/avh_warnings/
     model.py    warning grouping and picker labels, no Revit
+  lib/avh_flips/
+    model.py    flip state to parameter values, no Revit
+  lib/avh_doorcheck/
+    model.py    door states, arrow geometry and view naming, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -665,9 +842,22 @@ AVH.extension/
       Isolate Warnings.pushbutton/
     Data.panel/
       Room Data Sync.pushbutton/
+      Doors.pulldown/
+        Flip Status.pushbutton/
+        Door Room Check.pushbutton/
     Forma.panel/
       Make Forma View.pushbutton/
 ```
+
+`Doors.pulldown` is a pulldown, so the two buttons inside it share one
+ribbon slot. The folder name is the label and `icon.png` beside the
+buttons is its icon; nothing else is needed. **Nesting a button one level
+deeper broke how every script found `lib`**, which they all did by
+walking up a fixed number of directories from `__file__`. They now search
+upward for the folder that contains `lib`, which does not care how deep
+the button sits, and rule 6 in `test_ironpython_compat.py` enforces it.
+The harnesses cannot: each puts `lib` on `sys.path` itself before running
+the script, so the script's own resolution is never exercised.
 
 No `bundle.yaml` on any button: it is optional, it is parsed before any
 Python runs, and it was eliminated while hunting the engine failure.
@@ -714,6 +904,8 @@ python test_room_sync.py
 python test_room_sync_harness.py
 python test_forma_view_harness.py
 python test_isolate_warnings_harness.py
+python test_flip_status_harness.py
+python test_door_room_check_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -721,7 +913,7 @@ installed in the desktop Python you run them with: they load the written
 workbooks back through independent code, which is the point. Nothing
 about that reaches Revit, where openpyxl cannot run at all.
 
-`test_ironpython_compat.py` is 118 static checks that every shipped file
+`test_ironpython_compat.py` is 529 static checks that every shipped file
 can actually run on IronPython 2.7: encoding declarations, u-prefixed
 literals, no f-strings or `open(encoding=)` or bare `str()`, no
 `#! python3`, and a parse of every file under the **Python 2 grammar**
@@ -823,6 +1015,91 @@ the dedup inside a warning kind 2, and letting two long descriptions
 truncate onto the same picker label 3. That last one matters more than it
 sounds: two collided labels means picking one kind silently isolates the
 other.
+
+`test_flip_status_harness.py` runs the **real** Flip Status script
+against a mocked Revit, 78 checks. Its fake parameters keep their values
+across a run, so the test that matters most is possible at all: running
+twice must write nothing the second time. It also covers a parameter
+missing, of the wrong type, read only, not varying across groups, an
+older API with no `GetDataType`, a `Set` that returns false, a `Set` that
+raises the way a workshared element does, a commit Revit rolls back, a
+family document, a category absent from this Revit, and a flip property
+that will not answer.
+
+Every rule is mutation tested. Writing regardless of the current value
+fails 4 checks, comparing the doubles with `!=` instead of a tolerance 1,
+skipping the Area type check 2, ignoring read only 2, ignoring what `Set`
+returns 2, ignoring the commit status 2, treating an unreadable flip
+property as flipped 1, and running on family documents 2. Cutting it back
+to `Mirrored` alone, which is what Engipedia's add in does, does not fail
+the suite so much as crash it, which is loud enough.
+
+**The group scenarios are there because the first version shipped
+without them.** The fake now models Revit's rule: writing an instance
+parameter onto a grouped element whose parameter does not vary across
+group instances posts a failure, and a transaction that has failures and
+no preprocessor is recorded as having reached the Ungroup dialog.
+`UNGROUP_DIALOG` must be False at the end of every scenario, and there is
+a check at the end of the file that says so.
+
+Restoring 2.14.0's behaviour, writing grouped elements anyway, fails 4
+checks. Never attaching the failure guard fails 3, the guard returning
+`Continue` instead of `ProceedWithRollBack` fails 3, never detecting
+group membership fails 12, setting the flag inside the write transaction
+rather than its own fails 7, and asking about groups in a model that has
+none fails 1.
+
+**This is the fifth time a mock here has been wrong, and the first time
+by omission.** The other four invented state that did not exist and made
+working code look broken. This one modelled no groups at all, so nothing
+in it could ever refuse a write for the reason Revit does, and a tool
+that walks into an unignorable error looked fully covered. A mock that
+cannot fail the way production fails is not a test of that failure.
+
+`test_door_room_check_harness.py` runs the **real** Door Room Check
+script against a mocked Revit, 91 checks. The arrow geometry is checked
+as arithmetic in every direction, including diagonal, because an arrow
+pointing at the wrong room is a drawing that lies quietly. The rest
+covers the six door states, rerunning without doubling the marks, a view
+the tool did not make being left alone, a level picker cancelled, no
+doors, no text note type, a family document, and a commit Revit rolls
+back.
+
+Mutation tested. Reversing the arrow fails 9 checks, drawing at a fixed
+model size instead of scaling to the view 2, never clearing the previous
+run 4, reusing any plan view rather than ours by name 1, preferring the
+unphased room over the phased one 1, treating a blank ToRoom as fine 4,
+missing the both-sides-same-room case 3, and collecting doors from every
+level 2. On the 2.15.2 behaviour: going back to the last phase without
+asking fails 9, dropping the room counts from the picker labels 12,
+never setting the view's phase 2, ignoring a read only view phase 1,
+leaving a view template in place 1, leaving `Lines` hidden 1, saying
+nothing when the chosen phase holds no rooms 2, and not counting the
+arrows 1.
+
+The fake door now answers only for the phase its rooms are in, which is
+the only way the picker can be tested rather than merely exercised.
+
+**Two of those checks started out as decoration and had to be rebuilt.**
+A prefix guard inside the cleanup could never fire, since the only view
+ever passed to it was the one found by that exact name, so removing it
+changed nothing: it is gone as of 2.15.1, and ownership now lives in one
+place. It was described as gone at 2.15.0 while it was still there,
+because the edit that removed it was applied by a script that did not
+check whether its replacement had matched anything, and it had not. The
+tests could not catch that, since the guard was unreachable either way.
+**An edit that is not verified is a claim, not a change.** And
+the foreign view scenario passed under mutation for the wrong reason,
+because a run that threw and rolled back restored the annotation it would
+otherwise have deleted. Asserting only that nothing was destroyed is not
+enough; the positive has to be asserted beside it.
+
+The mock was also wrong twice here, both times in the direction that
+hides bugs rather than invents them. `DB.TextNote` was handed to the
+script as a namespace rather than a class, so the cleanup collector
+matched nothing and the missing cleanup looked like a script bug. And a
+door's unphased property returned the same room as its phased getter, so
+dropping the phased route entirely changed no result.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the
