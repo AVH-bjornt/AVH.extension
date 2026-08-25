@@ -22,7 +22,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Selection.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Tools.panel", "Selection.pulldown",
                       "Zoom To Selection.pushbutton", "script.py")
 
 from avh_selection import model  # noqa: E402

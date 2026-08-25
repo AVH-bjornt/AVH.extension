@@ -12,7 +12,9 @@ to it.
 **Tools.** Flip Grid Ends toggles which end bubble(s) show on selected
 grids. Remove Level moves everything off a level and then offers to
 delete it. Isolate Warnings isolates everything Revit has a warning
-about, and clears the isolate on the next click.
+about, and clears the isolate on the next click. Under the **Selection**
+pulldown, Zoom to Selection zooms the active view to whatever is
+selected.
 
 **Data.** Room Data Sync copies each room's CCI location ID onto the
 furniture, casework, doors and equipment inside it. Under the **Doors**
@@ -21,13 +23,10 @@ flipped into parameters that can be scheduled and filtered, and Door Room
 Check draws a plan showing which room each door actually takes its ID
 from.
 
-**Selection.** Zoom to Selection zooms the active view to whatever is
-selected, with a margin.
-
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.17.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.17.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -579,7 +578,7 @@ view of any other name is never found, so it is never cleared and never
 drawn into. Name your own plan exactly that and it will be refreshed,
 which is the one case worth knowing about.
 
-**AVH > Selection > Zoom to Selection**
+**AVH > Tools > Selection > Zoom to Selection**
 
 Zooms the active view to whatever is selected, as one box around all of
 it, with a margin. It stays in the view you are in: nothing opens another
@@ -647,7 +646,8 @@ not in this code at all.
 | 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Worked |
 | 2.15.2 | Door Room Check: the phase is asked for, not assumed | Worked |
 | 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Worked |
-| 2.17.0 | Selection panel: Zoom to Selection | Current, **untested in Revit** |
+| 2.17.0 | Zoom to Selection, on its own panel | Panel was the wrong home |
+| 2.17.1 | Moved into a Selection pulldown on Tools | Current, **untested in Revit** |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -869,13 +869,13 @@ AVH.extension/
       Flip Grid Ends.pushbutton/
       Remove Level.pushbutton/
       Isolate Warnings.pushbutton/
+      Selection.pulldown/
+        Zoom To Selection.pushbutton/
     Data.panel/
       Room Data Sync.pushbutton/
       Doors.pulldown/
         Flip Status.pushbutton/
         Door Room Check.pushbutton/
-    Selection.panel/
-      Zoom To Selection.pushbutton/
     Forma.panel/
       Make Forma View.pushbutton/
 ```
