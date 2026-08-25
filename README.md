@@ -7,8 +7,8 @@ Calibri, `#195784` headers, the AVH logo, grouping taken from each
 schedule's own Revit settings, and live `SUM` subtotals.
 
 **Worksets.** Creates one workset per linked model and assigns the links
-to it. Datums to Workset puts every grid, level and graphical view into
-one chosen workset.
+to it. Datums to Workset puts every grid and level into one chosen
+workset.
 
 **Tools.** Flip Grid Ends toggles which end bubble(s) show on selected
 grids. Remove Level moves everything off a level and then offers to
@@ -27,7 +27,7 @@ from.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.18.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.18.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -123,26 +123,19 @@ IronPython checks that every file in the extension has to pass.
 
 **AVH > Worksets > Datums to Workset**
 
-Pick a workset and it moves every grid, every level and every graphical
-view into it. AVH's is `Shared Views, Levels, Grids`, which the picker
-offers first and marks as the usual one, but the list is whatever the
-model actually has, so a project that names it differently still works.
+Pick a workset and it moves every grid and every level into it. AVH's is
+`Shared Views, Levels, Grids`, which the picker offers first and marks as
+the usual one, but the list is whatever the model actually has, so a
+project that names it differently still works.
 
-**Views may refuse, and that is expected.** A grid's and a level's
-workset is an ordinary editable parameter. A view's may not be: Revit
-does not let you change a view's workset in the interface at all, and
-whether the API allows it varies. Every write is checked, both its return
-value and for an exception, and anything refused is reported by kind,
-reason and name. If views turn out to be immovable on your Revit, the
-grids and levels still move and the report says why the views did not.
-
-Graphical views only: plans, sections, elevations, 3D, drafting and
-legends. Sheets, schedules and view templates are left alone, by
-decision, because moving sheets to a datum workset is a bigger change
-than it sounds. Sheets and schedules are excluded **by class**, and the
-browser pseudo views by view type, with no overlap between the two
-checks: listing sheets in both meant removing either one changed nothing,
-which is how a check becomes decoration.
+**Views are not touched, and that is settled.** 2.18.0 moved graphical
+views as well, on the reasoning that the API might allow what the
+interface does not. On Eldisgarður every one of them refused. Rather than
+leave a category in that reports a failure on every run, views came out
+entirely at 2.18.1, which also makes the name literally right: a datum is
+a grid or a level. If a way to move views ever turns up, it belongs in
+its own tool with its own report, not as a permanently failing third of
+this one.
 
 **Elements somebody else has checked out are never attempted.**
 `WorksharingUtils.GetCheckoutStatus` is asked first, they are skipped and
@@ -680,7 +673,8 @@ not in this code at all.
 | 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Worked |
 | 2.17.0 | Zoom to Selection, on its own panel | Panel was the wrong home |
 | 2.17.1 | Moved into a Selection pulldown on Tools | Shipped |
-| 2.18.0 | Worksets panel: Datums to Workset | Current, **untested in Revit** |
+| 2.18.0 | Worksets panel: Datums to Workset | Views refused, as suspected |
+| 2.18.1 | Views dropped: grids and levels only | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -1187,18 +1181,22 @@ says which rule applies and there is a second one for a selection large
 enough that the fraction takes over.
 
 `test_datums_workset_harness.py` runs the **real** Datums to Workset
-script against a mocked Revit, 47 checks. The interesting cases are all
+script against a mocked Revit, 48 checks. The interesting cases are all
 refusals: a read only parameter, a `Set` that returns False, a `Set` that
 raises, an element checked out by another user, and one with no workset
 parameter at all. Each asserts both that nothing was written and that the
 report says why.
 
-Mutation tested. Writing when the element is already there fails 2
-checks, ignoring what `Set` returns 2, ignoring read only 4, attempting
-elements owned by others 2, including sheets and schedules 3, including
-view templates 2, including the browser view types 2, ignoring the commit
-status 2, not offering the usual workset first 2, and running on a model
-that is not workshared 2.
+Mutation tested. Collecting views again fails 6 checks, dropping levels
+5, ignoring read only 4, writing when the element is already there 2,
+ignoring what `Set` returns 2, attempting elements owned by others 2,
+ignoring the commit status 2, not offering the usual workset first 2, and
+running on a model that is not workshared 2.
+
+One assertion in it was wrong in a way worth remembering: checking that
+the word `Views` never appears in the report failed, because the target
+workset is called Shared **Views**, Levels, Grids. It now matches the
+table row rather than the bare word.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the

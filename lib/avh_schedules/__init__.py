@@ -17,7 +17,7 @@ Layered so the Revit dependency stays in one place:
 from .model import ScheduleTable, Column  # noqa: F401
 from .writer import write_workbook  # noqa: F401
 
-__version__ = "2.18.0"
+__version__ = "2.18.1"
 
 # reader imports Autodesk.Revit only inside its Revit specific functions,
 # so importing this package outside Revit stays safe for testing.

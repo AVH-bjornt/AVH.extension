@@ -15,9 +15,11 @@ CONVENTIONAL = u"Shared Views, Levels, Grids"
 
 GRIDS = "grids"
 LEVELS = "levels"
-VIEWS = "views"
 
-KINDS = ((GRIDS, u"Grids"), (LEVELS, u"Levels"), (VIEWS, u"Views"))
+# Views were a third kind until 2.18.1. Revit refused every one of them,
+# so they are gone rather than left in as a category that reports a
+# failure on every run.
+KINDS = ((GRIDS, u"Grids"), (LEVELS, u"Levels"))
 KIND_LABELS = dict(KINDS)
 
 # Why an element was left alone. Each one is reported with the element

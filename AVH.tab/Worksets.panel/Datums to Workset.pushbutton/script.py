@@ -1,25 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Put every grid, level and view into one workset.
+"""Put every grid and level into one workset.
 
-Pick a workset and the tool moves all grids, all levels and all
-graphical views into it. AVH's is called "Shared Views, Levels, Grids",
-which the picker offers first and marks, but the list is whatever the
-model actually has, so a project that names it differently still works.
+Pick a workset and the tool moves all grids and all levels into it.
+AVH's is called "Shared Views, Levels, Grids", which the picker offers
+first and marks, but the list is whatever the model actually has, so a
+project that names it differently still works.
 
-## Views may refuse
+## Views are not touched, and that is settled
 
-A grid's and a level's workset are ordinary editable parameters. **A
-view's may not be.** Revit does not let you change a view's workset in
-the interface at all, and whether the API allows it varies. So every
-write is checked, both its return value and for an exception, and
-anything refused is reported by kind and reason rather than silently
-skipped. If views turn out to be immovable on your Revit, the report
-will say so plainly and the grids and levels still move.
+2.18.0 moved graphical views as well. On Eldisgardur they refused, which
+is what the Revit interface implies: it offers no way to change a view's
+workset, and the API declines to either. Rather than leave a category in
+that reports a failure on every run, views are out entirely as of
+2.18.1. The name is now literally right: a datum is a grid or a level.
 
-Graphical views only: plans, sections, elevations, 3D, drafting and
-legends. Sheets, schedules and view templates are left where they are,
-by decision, because moving sheets to a datum workset is a bigger change
-than it sounds.
+If a way to move views ever turns up, it belongs in its own tool with
+its own report, not as a permanently failing third of this one.
 
 ## Nothing needless is written
 
@@ -36,17 +32,17 @@ how a run dies half way through. Each one is checked first through
 
 ## Unverified
 
-Not yet run in Revit: whether `ELEM_PARTITION_PARAM` is writable on a
-view, `WorksharingUtils.GetCheckoutStatus`, and
-`FilteredWorksetCollector`. The whole run is one transaction whose
-commit status is checked, so a rejected write cannot report success.
+`WorksharingUtils.GetCheckoutStatus` and `FilteredWorksetCollector` have
+not been exercised on a model with several people in it. The whole run
+is one transaction whose commit status is checked, so a rejected write
+cannot report success.
 """
 
 __title__ = "Datums to\nWorkset"
 __author__ = "AVH"
-__doc__ = ("Put every grid, level and graphical view into one workset, "
-           "normally Shared Views, Levels, Grids. Reports anything that "
-           "refuses, including views, which Revit may not allow.")
+__doc__ = ("Put every grid and level into one workset, normally Shared "
+           "Views, Levels, Grids. Views are not touched: Revit does not "
+           "allow their workset to be changed.")
 
 import os
 import sys
@@ -75,17 +71,6 @@ logger = script.get_logger()
 TITLE = u"Datums to Workset"
 
 MAX_LISTED = 20
-
-# View kinds that are not drawings and should be left alone. Checked by
-# name through getattr, so a Revit without one of them simply drops it.
-#
-# Sheets and schedules are deliberately **not** here: they are excluded
-# by class below, and listing them in both places meant removing either
-# guard changed nothing, which is how a check becomes decoration.
-# ColumnSchedule and PanelSchedule stay, because those are not
-# necessarily ViewSchedule instances and the class test may miss them.
-SKIP_VIEW_TYPES = ("Internal", "ProjectBrowser", "SystemBrowser",
-                   "ColumnSchedule", "PanelSchedule", "Undefined")
 
 
 def element_name(element):
@@ -130,29 +115,12 @@ def pick_workset(doc):
     return by_name.get(mapping.get(to_text(chosen)))
 
 
-def is_graphical_view(view):
-    try:
-        if view.IsTemplate:
-            return False
-    except BaseException:
-        return False
-    for class_name in ("ViewSheet", "ViewSchedule"):
-        cls = getattr(DB, class_name, None)
-        if cls is not None and isinstance(view, cls):
-            return False
-    try:
-        view_type = view.ViewType
-    except BaseException:
-        return False
-    for name in SKIP_VIEW_TYPES:
-        wanted = getattr(DB.ViewType, name, None)
-        if wanted is not None and view_type == wanted:
-            return False
-    return True
-
-
 def collect(doc):
-    """(kind, element) for everything this tool moves."""
+    """(kind, element) for everything this tool moves.
+
+    Grids and levels, and nothing else. Views were collected here until
+    2.18.1 and refused every time.
+    """
     found = []
     for kind, cls_name in ((model.GRIDS, "Grid"), (model.LEVELS, "Level")):
         cls = getattr(DB, cls_name, None)
@@ -165,15 +133,6 @@ def collect(doc):
                 found.append((kind, element))
         except BaseException as exc:
             logger.debug(to_text(exc))
-
-    try:
-        collector = DB.FilteredElementCollector(doc).OfClass(DB.View)
-        for view in collector:
-            if is_graphical_view(view):
-                found.append((model.VIEWS, view))
-    except BaseException as exc:
-        logger.debug(to_text(exc))
-
     return found
 
 
@@ -297,7 +256,7 @@ def run():
 
     elements = collect(doc)
     if not elements:
-        forms.alert(u"No grids, levels or views were found.", title=TITLE)
+        forms.alert(u"No grids or levels were found.", title=TITLE)
         return
 
     tally = model.Tally()

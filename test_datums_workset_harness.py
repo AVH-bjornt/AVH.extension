@@ -315,15 +315,15 @@ tally = model.Tally()
 tally.count_moved(model.GRIDS)
 tally.count_moved(model.GRIDS)
 tally.count_already(model.LEVELS)
-tally.count_skipped(model.VIEWS, model.READ_ONLY, u"Level 1 plan")
-tally.count_skipped(model.VIEWS, model.READ_ONLY, u"Section A")
+tally.count_skipped(model.LEVELS, model.READ_ONLY, u"E01")
+tally.count_skipped(model.LEVELS, model.READ_ONLY, u"E02")
 check("tally: counted per kind",
       tally.rows()[0] == (u"Grids", 2, 0, 0), str(tally.rows()))
 check("tally: totals add up",
       tally.total_moved() == 2 and tally.total_already() == 1 and
       tally.total_skipped() == 2)
 check("tally: one reason with a count, not two lines",
-      tally.reasons() == [(u"Views", model.READ_ONLY, 2)],
+      tally.reasons() == [(u"Levels", model.READ_ONLY, 2)],
       str(tally.reasons()))
 
 
@@ -333,17 +333,15 @@ check("tally: one reason with a count, not two lines",
 
 grid = FakeGrid(u"A", workset=1)
 level = FakeLevel(u"E01", workset=1)
-view = FakeView(u"Level 1", workset=1)
-doc = FakeDocument([grid, level, view], worksets=[OTHER, TARGET])
+doc = FakeDocument([grid, level], worksets=[OTHER, TARGET])
 recorder = run_script(doc, picked=TARGET_LABEL)
 
 check("run: the grid moved", grid.workset() == 42)
 check("run: the level moved", level.workset() == 42)
-check("run: the view moved", view.workset() == 42)
 check("run: committed once", len(FakeTransaction.committed) == 1)
 check("run: the report names the target workset",
       model.CONVENTIONAL in recorder.text())
-check("run: three moved", u"**3 moved**" in recorder.text(),
+check("run: two moved", u"**2 moved**" in recorder.text(),
       recorder.text()[-300:])
 check("run: no alert when nothing refused", not recorder.alerts,
       u" | ".join(recorder.alerts))
@@ -373,41 +371,51 @@ check("already there: counted separately",
 
 
 # --------------------------------------------------------------------------
-# 3. Which views, and which not
+# 3. Views are not touched at all
 # --------------------------------------------------------------------------
 
+# 2.18.0 moved graphical views too, and Revit refused every one on
+# Eldisgardur. They are out entirely now, so the check is that a model
+# full of them comes away untouched rather than reporting failures.
+grid = FakeGrid(u"A", workset=1)
 plan = FakeView(u"Level 1", workset=1)
 legend = FakeView(u"Legend", workset=1, view_type="Legend")
-template = FakeView(u"Template", workset=1, is_template=True)
 sheet = FakeSheet(u"A101", workset=1, view_type="DrawingSheet")
 schedule = FakeSchedule(u"Door schedule", workset=1, view_type="Schedule")
-browser = FakeView(u"Browser", workset=1, view_type="ProjectBrowser")
-doc = FakeDocument([plan, legend, template, sheet, schedule, browser],
+doc = FakeDocument([grid, plan, legend, sheet, schedule],
                    worksets=[OTHER, TARGET])
 recorder = run_script(doc, picked=TARGET_LABEL)
 
-check("views: a plan moved", plan.workset() == 42)
-check("views: a legend moved", legend.workset() == 42)
-check("views: a view template is left alone", template.workset() == 1)
-check("views: a sheet is left alone", sheet.workset() == 1)
-check("views: a schedule is left alone", schedule.workset() == 1)
-check("views: the project browser is left alone", browser.workset() == 1)
-check("views: only the two drawings are counted",
-      u"**2 moved**" in recorder.text(), recorder.text()[-300:])
+check("views: a plan is left where it is", plan.workset() == 1)
+check("views: a legend is left where it is", legend.workset() == 1)
+check("views: a sheet is left where it is", sheet.workset() == 1)
+check("views: a schedule is left where it is", schedule.workset() == 1)
+check("views: not written to at all",
+      plan.parameter.writes == 0 and legend.parameter.writes == 0)
+# Not just "Views" anywhere: the workset is called Shared Views, Levels,
+# Grids, so the plain substring matches the target name and the check
+# would have failed for the wrong reason.
+check("views: no Views row in the table",
+      u"| Views |" not in recorder.text(), recorder.text()[:400])
+check("views: and no reason listed against them",
+      u"Views:" not in recorder.text())
+check("views: the grid still moved", grid.workset() == 42)
+check("views: one moved, and only one", u"**1 moved**" in recorder.text(),
+      recorder.text()[-300:])
 
 
 # --------------------------------------------------------------------------
 # 4. Everything that can refuse
 # --------------------------------------------------------------------------
 
-read_only = FakeView(u"Level 1", workset=1, read_only=True)
+read_only = FakeLevel(u"E01", workset=1, read_only=True)
 doc = FakeDocument([read_only], worksets=[OTHER, TARGET])
 recorder = run_script(doc, picked=TARGET_LABEL)
 check("read only: not moved", read_only.workset() == 1)
 check("read only: reported with the reason",
       model.READ_ONLY in recorder.text())
 check("read only: and the element named",
-      u"Level 1" in recorder.text())
+      u"E01" in recorder.text())
 check("read only: the user is told, not left to notice",
       any(u"could not be" in alert for alert in recorder.alerts),
       u" | ".join(recorder.alerts))
@@ -463,7 +471,7 @@ check("no user worksets: said so", u"no user worksets" in recorder.text())
 doc = FakeDocument([], worksets=[OTHER, TARGET])
 recorder = run_script(doc, picked=TARGET_LABEL)
 check("nothing to move: said so",
-      u"No grids, levels or views" in recorder.text())
+      u"No grids or levels" in recorder.text())
 
 grid = FakeGrid(u"A", workset=1)
 doc = FakeDocument([grid], worksets=[OTHER, TARGET])
