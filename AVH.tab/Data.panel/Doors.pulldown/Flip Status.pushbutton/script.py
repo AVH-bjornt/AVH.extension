@@ -68,7 +68,7 @@ Not yet run to completion in Revit. `FamilyInstance.Mirrored`,
 `HandFlipped` and `FacingFlipped`, `Definition.GetDataType` against
 `SpecTypeId.Area`, `InternalDefinition.SetAllowVaryBetweenGroups`,
 `Element.GroupId`, and the failure preprocessor. The group failure
-itself is confirmed: Bjorn hit it on Eldisgardur at 2.14.0.
+itself is confirmed: Bjorn hit it on a live project at 2.14.0.
 """
 
 __title__ = "Flip\nStatus"

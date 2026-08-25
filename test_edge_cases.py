@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Edge cases the four Eldisgardur exports do not cover.
+Edge cases the four a live project exports do not cover.
 
 These are the shapes most likely to turn up in the rest of the model and
 crash a run: no grouping at all, nothing summable, one lonely column, a

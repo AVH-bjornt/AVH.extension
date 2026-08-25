@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Exercise the extension's parsing and writing path against the four real
-Eldisgardur exports, with no Revit involved.
+a live project exports, with no Revit involved.
 
 These are the actual files Bjorn handed over, so the expected values are
 the ones confirmed on the delivered workbooks: row counts, the grouping

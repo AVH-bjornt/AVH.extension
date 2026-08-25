@@ -2,7 +2,7 @@
 """
 Turn a ScheduleTable into an AVH styled workbook.
 
-The formatting confirmed against the Eldisgarður room schedule and the
+The formatting confirmed against the a live project room schedule and the
 interior, exterior and industrial door schedules. Subtotals are real SUM
 formulas, not precomputed numbers, so the sheet stays live when someone
 edits a row.

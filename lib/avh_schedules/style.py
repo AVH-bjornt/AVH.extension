@@ -2,7 +2,7 @@
 """
 The AVH house style, expressed against the local xlsx writer.
 
-Confirmed with Björn on the Eldisgarður room and door schedules:
+Confirmed with Björn on the the room and door schedules of a live project:
 
     Calibri throughout.
     Header and section rows: solid #195784, white bold text.
