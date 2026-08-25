@@ -7,12 +7,15 @@ Calibri, `#195784` headers, the AVH logo, grouping taken from each
 schedule's own Revit settings, and live `SUM` subtotals.
 
 **Worksets.** Creates one workset per linked model and assigns the links
-to it.
+to it. Datums to Workset puts every grid and level into one chosen
+workset.
 
 **Tools.** Flip Grid Ends toggles which end bubble(s) show on selected
 grids. Remove Level moves everything off a level and then offers to
 delete it. Isolate Warnings isolates everything Revit has a warning
-about, and clears the isolate on the next click.
+about, and clears the isolate on the next click. Under the **Selection**
+pulldown, Zoom to Selection zooms the active view to whatever is
+selected.
 
 **Data.** Room Data Sync copies each room's CCI location ID onto the
 furniture, casework, doors and equipment inside it. Under the **Doors**
@@ -24,7 +27,7 @@ from.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.16.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.18.1.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -117,6 +120,30 @@ The model has to be workshared. If it is not, the tool says so and stops.
 This one is Björn's, kept here so it ships with everything else. It is not
 covered by the test suites the way the schedule code is, beyond the static
 IronPython checks that every file in the extension has to pass.
+
+**AVH > Worksets > Datums to Workset**
+
+Pick a workset and it moves every grid and every level into it. AVH's is
+`Shared Views, Levels, Grids`, which the picker offers first and marks as
+the usual one, but the list is whatever the model actually has, so a
+project that names it differently still works.
+
+**Views are not touched, and that is settled.** 2.18.0 moved graphical
+views as well, on the reasoning that the API might allow what the
+interface does not. On Eldisgarður every one of them refused. Rather than
+leave a category in that reports a failure on every run, views came out
+entirely at 2.18.1, which also makes the name literally right: a datum is
+a grid or a level. If a way to move views ever turns up, it belongs in
+its own tool with its own report, not as a permanently failing third of
+this one.
+
+**Elements somebody else has checked out are never attempted.**
+`WorksharingUtils.GetCheckoutStatus` is asked first, they are skipped and
+named. Attempting them is how a run dies half way through a model.
+
+Already in the target workset means left alone, counted separately.
+Rewriting the same value onto every grid marks the whole model as
+modified, which on a workshared job turns a tidy up into a sync.
 
 **AVH > Tools > Flip Grid Ends**
 
@@ -576,6 +603,29 @@ view of any other name is never found, so it is never cleared and never
 drawn into. Name your own plan exactly that and it will be refreshed,
 which is the one case worth knowing about.
 
+**AVH > Tools > Selection > Zoom to Selection**
+
+Zooms the active view to whatever is selected, as one box around all of
+it, with a margin. It stays in the view you are in: nothing opens another
+view, nothing switches, and Revit's own "no good view" dialog never
+appears.
+
+**No transaction anywhere.** This changes what you are looking at, not
+the model, so there is nothing to roll back and it is safe on a
+workshared model with everything checked out by somebody else. A check in
+the harness fails if a transaction is ever opened.
+
+**The margin** is the larger of 15 percent of the selection's biggest
+dimension and 500 mm. Without a floor under it, zooming to a door handle
+fills the screen with a 20 mm object and you cannot tell where in the
+building you are. Below about 3.3 m the floor is what applies, which is
+most things anyone selects.
+
+**An element the view does not draw**, because it is on another level,
+hidden, or outside the crop, has no bounding box in that view. Its
+position in the model is used instead and the report says how many needed
+that, since zooming to nothing looks like a broken button.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -620,7 +670,11 @@ not in this code at all.
 | 2.15.0 | Data panel: Door Room Check | pyRevit refused three scripts at startup |
 | 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Worked |
 | 2.15.2 | Door Room Check: the phase is asked for, not assumed | Worked |
-| 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Current |
+| 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Worked |
+| 2.17.0 | Zoom to Selection, on its own panel | Panel was the wrong home |
+| 2.17.1 | Moved into a Selection pulldown on Tools | Shipped |
+| 2.18.0 | Worksets panel: Datums to Workset | Views refused, as suspected |
+| 2.18.1 | Views dropped: grids and levels only | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -830,16 +884,23 @@ AVH.extension/
     model.py    flip state to parameter values, no Revit
   lib/avh_doorcheck/
     model.py    door states, arrow geometry and view naming, no Revit
+  lib/avh_selection/
+    model.py    bounding box arithmetic and margins, no Revit
+  lib/avh_worksets/
+    model.py    what moves, picker labels and the tally, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
       Diagnostics.pushbutton/
     Worksets.panel/
       Create Worksets From Links.pushbutton/
+      Datums to Workset.pushbutton/
     Tools.panel/
       Flip Grid Ends.pushbutton/
       Remove Level.pushbutton/
       Isolate Warnings.pushbutton/
+      Selection.pulldown/
+        Zoom To Selection.pushbutton/
     Data.panel/
       Room Data Sync.pushbutton/
       Doors.pulldown/
@@ -906,6 +967,8 @@ python test_forma_view_harness.py
 python test_isolate_warnings_harness.py
 python test_flip_status_harness.py
 python test_door_room_check_harness.py
+python test_zoom_selection_harness.py
+python test_datums_workset_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -1100,6 +1163,40 @@ script as a namespace rather than a class, so the cleanup collector
 matched nothing and the missing cleanup looked like a script bug. And a
 door's unphased property returned the same room as its phased getter, so
 dropping the phased route entirely changed no result.
+
+`test_zoom_selection_harness.py` runs the **real** Zoom to Selection
+script against a mocked Revit, 31 checks. Every scenario asserts the
+actual rectangle handed to Revit, because a zoom to the wrong box looks
+like the button not working and says nothing about why.
+
+Mutation tested. Dropping the padding fails 7 checks, dropping the
+minimum margin 2, using only the first selected element 3, preferring the
+model box over the view box 2, dropping the fallback for elements the
+view does not draw 3, zooming with an empty selection 1, never reporting
+out of view elements 2, and ignoring a missing UIView 1.
+
+One expectation in it was wrong on the first run, and the code was right:
+a 3 m element gets the 500 mm floor rather than 15 percent. The check now
+says which rule applies and there is a second one for a selection large
+enough that the fraction takes over.
+
+`test_datums_workset_harness.py` runs the **real** Datums to Workset
+script against a mocked Revit, 48 checks. The interesting cases are all
+refusals: a read only parameter, a `Set` that returns False, a `Set` that
+raises, an element checked out by another user, and one with no workset
+parameter at all. Each asserts both that nothing was written and that the
+report says why.
+
+Mutation tested. Collecting views again fails 6 checks, dropping levels
+5, ignoring read only 4, writing when the element is already there 2,
+ignoring what `Set` returns 2, attempting elements owned by others 2,
+ignoring the commit status 2, not offering the usual workset first 2, and
+running on a model that is not workshared 2.
+
+One assertion in it was wrong in a way worth remembering: checking that
+the word `Views` never appears in the report failed, because the target
+workset is called Shared **Views**, Levels, Grids. It now matches the
+table row rather than the bare word.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the
