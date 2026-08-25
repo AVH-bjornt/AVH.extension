@@ -8,7 +8,7 @@ project that names it differently still works.
 
 ## Views are not touched, and that is settled
 
-2.18.0 moved graphical views as well. On Eldisgardur they refused, which
+2.18.0 moved graphical views as well. On a live project they refused, which
 is what the Revit interface implies: it offers no way to change a view's
 workset, and the API declines to either. Rather than leave a category in
 that reports a failure on every run, views are out entirely as of

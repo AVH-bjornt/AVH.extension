@@ -25,7 +25,7 @@ COLLATERAL = u"collateral"  # not a candidate at all, see below
 # level, and the tool takes the same route by a better road: unplace the
 # room, place it again in an empty plan circuit on the target level, and
 # put it back at its own coordinates. That preserves the room number,
-# which a copy and paste does not, and on Eldisgarður the room number is
+# which a copy and paste does not, and on a live project the room number is
 # schedule data.
 #
 # Unlike every other class here a room does **not** keep its absolute
@@ -106,7 +106,7 @@ def room_height_after(source_elevation, target_elevation, base_offset,
     matters here: this tool checks feasibility by doing the work in a
     transaction it rolls back, and a rollback never validates. So a room
     move can pass the probe and still be thrown away on commit, which is
-    exactly what happened on Eldisgarður: the run reported a room moved
+    exactly what happened on a live project: the run reported a room moved
     and then, three lines later, listed the same room as still on the
     level being deleted.
 

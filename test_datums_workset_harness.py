@@ -375,7 +375,7 @@ check("already there: counted separately",
 # --------------------------------------------------------------------------
 
 # 2.18.0 moved graphical views too, and Revit refused every one on
-# Eldisgardur. They are out entirely now, so the check is that a model
+# a live project. They are out entirely now, so the check is that a model
 # full of them comes away untouched rather than reporting failures.
 grid = FakeGrid(u"A", workset=1)
 plan = FakeView(u"Level 1", workset=1)

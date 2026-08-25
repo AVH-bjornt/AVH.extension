@@ -13,7 +13,7 @@ delimiter and parses the result. Three reasons:
 1. A tab delimiter removes the decimal comma collision that corrupts
    AVH's comma delimited exports, at the source.
 2. The resulting layout is the one already validated against four real
-   Eldisgardur exports, including the multi level door schedule headers
+   a live project exports, including the multi level door schedule headers
    and Revit's rendered group footer lines.
 3. parse_delimited() below is a pure function, so the whole parsing path
    is testable on CSV fixtures without opening Revit. Given that the
@@ -52,7 +52,7 @@ def _find_header_depth(rows, max_scan=8):
     """Header rows run from row 1 up to the first fully blank row.
 
     Revit writes a blank separator line between the column headers and
-    the data. Verified on all four Eldisgardur exports: one header row
+    the data. Verified on all four a live project exports: one header row
     for the room schedule, three for the door schedules.
     """
     for i in range(1, min(len(rows), max_scan)):

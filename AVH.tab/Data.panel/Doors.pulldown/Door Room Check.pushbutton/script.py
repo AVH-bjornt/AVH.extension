@@ -37,7 +37,7 @@ drawn into.
 
 Rooms exist per phase, and asking the wrong one gives no rooms at all
 rather than an error. 2.15.0 used the document's last phase without
-asking. On Eldisgardur that is Phase 2, the rooms are not in it, and the
+asking. On a live project that is Phase 2, the rooms are not in it, and the
 result was a plan reading "no room" at every single door: a confident
 drawing of nothing.
 
@@ -68,7 +68,7 @@ Not yet run to completion in Revit: `ViewPlan.Create`, `NewDetailCurve`,
 `BuiltInParameter.VIEW_PHASE` and `ROOM_PHASE`, and whether the plan
 view's `Origin` sits at a Z the detail curves will accept. The room
 lookup is the same `get_ToRoom(phase)` route Room Data Sync runs on
-Eldisgardur, and the phase failure above is confirmed.
+a live project, and the phase failure above is confirmed.
 """
 
 __title__ = "Door Room\nCheck"
@@ -171,7 +171,7 @@ def pick_phase(doc):
 
     Always asked, because getting it wrong is invisible: 2.15.0 used the
     document's last phase without asking, found no rooms in it on
-    Eldisgardur, and drew a plan reading "no room" at every door.
+    a live project, and drew a plan reading "no room" at every door.
     """
     phases = all_phases(doc)
     if not phases:

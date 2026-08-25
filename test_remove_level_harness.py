@@ -923,7 +923,7 @@ check("and the level is finally deletable", 100 in doc.deleted,
 
 # --- 6b. the room that broke, and the two rules it produced -----------
 #
-# Room 7555204 on Eldisgarður. Its base level parameter is read only and
+# Room 7555204 on a live project. Its base level parameter is read only and
 # its ROOM_UPPER_LEVEL is writable, so the scan repointed the upper limit
 # to a level 3740 mm lower and corrected nothing, leaving the room's top
 # below its own base. The level was still blocked afterwards, because the
@@ -1028,7 +1028,7 @@ check("and warns that it may be a top constraint",
 
 # --- 6e. rehosting a curve off a level owned work plane ---------------
 #
-# Model line 7555172 on Eldisgarður. Nothing on it points at the level, so
+# Model line 7555172 on a live project. Nothing on it points at the level, so
 # no parameter can move it; it is bound through the sketch plane it sits
 # on. Replacing that plane with an equivalent one owned by no level frees
 # it without moving it.
@@ -1073,7 +1073,7 @@ check("and the level stays, because the line still hangs off it",
 
 # --- 6e2. a curve that only looks rehostable --------------------------
 #
-# Five model lines on Eldisgarður were offered for rehosting and all five
+# Five model lines on a live project were offered for rehosting and all five
 # failed: they were sketch lines belonging to the stairs and railings.
 # Nothing about them is distinguishable from the outside, so the dry run
 # now tries each one in a transaction it throws away, and reports only
@@ -1116,7 +1116,7 @@ check("and the level is not deleted, since the sketch line still holds it",
 # takes the same route by a better road: unplace the room, place it again
 # in an empty enclosed area on the target level, put it back at its own
 # coordinates. That keeps the room number, which a copy does not, and on
-# Eldisgarður the room number is schedule data.
+# a live project the room number is schedule data.
 
 def room_scenario(circuits_on_target, x=10.0, y=10.0):
     lower, upper = two_levels()
@@ -1246,7 +1246,7 @@ check("no level is deleted after a rolled back room step",
 
 # --- 6j3. the room Revit throws away on commit ------------------------
 #
-# The Eldisgarður failure, reconstructed. A room whose upper limit is
+# The a live project failure, reconstructed. A room whose upper limit is
 # anchored to a level that is not moving. Move its floor above that
 # anchor and the height goes negative, and Revit rejects it **during the
 # commit**, which a rollback based probe can never see. The tool

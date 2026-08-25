@@ -175,7 +175,7 @@ def phase_labels(entries):
     the label because the phase to pick is the one the rooms are in, and
     nobody should have to know that in advance. The first version of this
     tool asked the document's last phase without asking anyone, got no
-    rooms at all on Eldisgardur, and drew a plan that said "no room" at
+    rooms at all on a live project, and drew a plan that said "no room" at
     every door.
 
     Returns (labels, mapping) where mapping is label to name.

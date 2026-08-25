@@ -272,7 +272,7 @@ check("check() records a real boolean, not a truthy string",
 
 # --- 7. room height after a move, which Revit only checks on commit ---
 #
-# The Eldisgarður failure. Revit validates room height when the
+# The a live project failure. Revit validates room height when the
 # transaction commits, and this tool checks feasibility by rolling one
 # back, so the probe is blind to it. Arithmetic is not.
 

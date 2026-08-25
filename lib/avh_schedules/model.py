@@ -12,7 +12,7 @@ import re
 
 from .compat import to_text
 
-# Level short codes seen on Eldisgardur (E01 to E04, EK2, EKL, EM1, EST).
+# Level short codes seen on a live project (E01 to E04, EK2, EKL, EM1, EST).
 # A project with a different coding convention should widen this pattern
 # rather than have the fallback silently return Unassigned.
 LEVEL_CODE_RE = re.compile(r"^(E\d{2}|EK\d|EKL|EM\d|EST)$")
