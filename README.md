@@ -7,7 +7,8 @@ Calibri, `#195784` headers, the AVH logo, grouping taken from each
 schedule's own Revit settings, and live `SUM` subtotals.
 
 **Worksets.** Creates one workset per linked model and assigns the links
-to it.
+to it. Datums to Workset puts every grid, level and graphical view into
+one chosen workset.
 
 **Tools.** Flip Grid Ends toggles which end bubble(s) show on selected
 grids. Remove Level moves everything off a level and then offers to
@@ -26,7 +27,7 @@ from.
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.17.1.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.18.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -119,6 +120,37 @@ The model has to be workshared. If it is not, the tool says so and stops.
 This one is Björn's, kept here so it ships with everything else. It is not
 covered by the test suites the way the schedule code is, beyond the static
 IronPython checks that every file in the extension has to pass.
+
+**AVH > Worksets > Datums to Workset**
+
+Pick a workset and it moves every grid, every level and every graphical
+view into it. AVH's is `Shared Views, Levels, Grids`, which the picker
+offers first and marks as the usual one, but the list is whatever the
+model actually has, so a project that names it differently still works.
+
+**Views may refuse, and that is expected.** A grid's and a level's
+workset is an ordinary editable parameter. A view's may not be: Revit
+does not let you change a view's workset in the interface at all, and
+whether the API allows it varies. Every write is checked, both its return
+value and for an exception, and anything refused is reported by kind,
+reason and name. If views turn out to be immovable on your Revit, the
+grids and levels still move and the report says why the views did not.
+
+Graphical views only: plans, sections, elevations, 3D, drafting and
+legends. Sheets, schedules and view templates are left alone, by
+decision, because moving sheets to a datum workset is a bigger change
+than it sounds. Sheets and schedules are excluded **by class**, and the
+browser pseudo views by view type, with no overlap between the two
+checks: listing sheets in both meant removing either one changed nothing,
+which is how a check becomes decoration.
+
+**Elements somebody else has checked out are never attempted.**
+`WorksharingUtils.GetCheckoutStatus` is asked first, they are skipped and
+named. Attempting them is how a run dies half way through a model.
+
+Already in the target workset means left alone, counted separately.
+Rewriting the same value onto every grid marks the whole model as
+modified, which on a workshared job turns a tidy up into a sync.
 
 **AVH > Tools > Flip Grid Ends**
 
@@ -647,7 +679,8 @@ not in this code at all.
 | 2.15.2 | Door Room Check: the phase is asked for, not assumed | Worked |
 | 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Worked |
 | 2.17.0 | Zoom to Selection, on its own panel | Panel was the wrong home |
-| 2.17.1 | Moved into a Selection pulldown on Tools | Current, **untested in Revit** |
+| 2.17.1 | Moved into a Selection pulldown on Tools | Shipped |
+| 2.18.0 | Worksets panel: Datums to Workset | Current, **untested in Revit** |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -859,12 +892,15 @@ AVH.extension/
     model.py    door states, arrow geometry and view naming, no Revit
   lib/avh_selection/
     model.py    bounding box arithmetic and margins, no Revit
+  lib/avh_worksets/
+    model.py    what moves, picker labels and the tally, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
       Diagnostics.pushbutton/
     Worksets.panel/
       Create Worksets From Links.pushbutton/
+      Datums to Workset.pushbutton/
     Tools.panel/
       Flip Grid Ends.pushbutton/
       Remove Level.pushbutton/
@@ -938,6 +974,7 @@ python test_isolate_warnings_harness.py
 python test_flip_status_harness.py
 python test_door_room_check_harness.py
 python test_zoom_selection_harness.py
+python test_datums_workset_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -1148,6 +1185,20 @@ One expectation in it was wrong on the first run, and the code was right:
 a 3 m element gets the 500 mm floor rather than 15 percent. The check now
 says which rule applies and there is a second one for a selection large
 enough that the fraction takes over.
+
+`test_datums_workset_harness.py` runs the **real** Datums to Workset
+script against a mocked Revit, 47 checks. The interesting cases are all
+refusals: a read only parameter, a `Set` that returns False, a `Set` that
+raises, an element checked out by another user, and one with no workset
+parameter at all. Each asserts both that nothing was written and that the
+report says why.
+
+Mutation tested. Writing when the element is already there fails 2
+checks, ignoring what `Set` returns 2, ignoring read only 4, attempting
+elements owned by others 2, including sheets and schedules 3, including
+view templates 2, including the browser view types 2, ignoring the commit
+status 2, not offering the usual workset first 2, and running on a model
+that is not workshared 2.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the
