@@ -21,10 +21,13 @@ flipped into parameters that can be scheduled and filtered, and Door Room
 Check draws a plan showing which room each door actually takes its ID
 from.
 
+**Selection.** Zoom to Selection zooms the active view to whatever is
+selected, with a margin.
+
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.16.0.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.17.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -576,6 +579,29 @@ view of any other name is never found, so it is never cleared and never
 drawn into. Name your own plan exactly that and it will be refreshed,
 which is the one case worth knowing about.
 
+**AVH > Selection > Zoom to Selection**
+
+Zooms the active view to whatever is selected, as one box around all of
+it, with a margin. It stays in the view you are in: nothing opens another
+view, nothing switches, and Revit's own "no good view" dialog never
+appears.
+
+**No transaction anywhere.** This changes what you are looking at, not
+the model, so there is nothing to roll back and it is safe on a
+workshared model with everything checked out by somebody else. A check in
+the harness fails if a transaction is ever opened.
+
+**The margin** is the larger of 15 percent of the selection's biggest
+dimension and 500 mm. Without a floor under it, zooming to a door handle
+fills the screen with a 20 mm object and you cannot tell where in the
+building you are. Below about 3.3 m the floor is what applies, which is
+most things anyone selects.
+
+**An element the view does not draw**, because it is on another level,
+hidden, or outside the crop, has no bounding box in that view. Its
+position in the model is used instead and the report says how many needed
+that, since zooming to nothing looks like a broken button.
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -620,7 +646,8 @@ not in this code at all.
 | 2.15.0 | Data panel: Door Room Check | pyRevit refused three scripts at startup |
 | 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Worked |
 | 2.15.2 | Door Room Check: the phase is asked for, not assumed | Worked |
-| 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Current |
+| 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Worked |
+| 2.17.0 | Selection panel: Zoom to Selection | Current, **untested in Revit** |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -830,6 +857,8 @@ AVH.extension/
     model.py    flip state to parameter values, no Revit
   lib/avh_doorcheck/
     model.py    door states, arrow geometry and view naming, no Revit
+  lib/avh_selection/
+    model.py    bounding box arithmetic and margins, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -845,6 +874,8 @@ AVH.extension/
       Doors.pulldown/
         Flip Status.pushbutton/
         Door Room Check.pushbutton/
+    Selection.panel/
+      Zoom To Selection.pushbutton/
     Forma.panel/
       Make Forma View.pushbutton/
 ```
@@ -906,6 +937,7 @@ python test_forma_view_harness.py
 python test_isolate_warnings_harness.py
 python test_flip_status_harness.py
 python test_door_room_check_harness.py
+python test_zoom_selection_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -1100,6 +1132,22 @@ script as a namespace rather than a class, so the cleanup collector
 matched nothing and the missing cleanup looked like a script bug. And a
 door's unphased property returned the same room as its phased getter, so
 dropping the phased route entirely changed no result.
+
+`test_zoom_selection_harness.py` runs the **real** Zoom to Selection
+script against a mocked Revit, 31 checks. Every scenario asserts the
+actual rectangle handed to Revit, because a zoom to the wrong box looks
+like the button not working and says nothing about why.
+
+Mutation tested. Dropping the padding fails 7 checks, dropping the
+minimum margin 2, using only the first selected element 3, preferring the
+model box over the view box 2, dropping the fallback for elements the
+view does not draw 3, zooming with an empty selection 1, never reporting
+out of view elements 2, and ignoring a missing UIView 1.
+
+One expectation in it was wrong on the first run, and the code was right:
+a 3 m element gets the 500 mm floor rather than 15 percent. The check now
+says which rule applies and there is a second one for a selection large
+enough that the fraction takes over.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the
