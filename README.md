@@ -15,15 +15,16 @@ delete it. Isolate Warnings isolates everything Revit has a warning
 about, and clears the isolate on the next click.
 
 **Data.** Room Data Sync copies each room's CCI location ID onto the
-furniture, casework, doors and equipment inside it. Flip Status records
-whether each family instance is mirrored or flipped into parameters that
-can be scheduled and filtered. Door Room Check draws a plan showing
-which room each door actually takes its ID from.
+furniture, casework, doors and equipment inside it. Under the **Doors**
+pulldown, Flip Status records whether each family instance is mirrored or
+flipped into parameters that can be scheduled and filtered, and Door Room
+Check draws a plan showing which room each door actually takes its ID
+from.
 
 Built from the formatting worked out on the Eldisgarður room and door
 schedules.
 
-**Version 2.15.2.** Runs on IronPython. openpyxl is gone, replaced by a
+**Version 2.16.0.** Runs on IronPython. openpyxl is gone, replaced by a
 small OOXML writer. See _Why the rewrite_ below. The authoritative version
 number is `__version__` in `lib/avh_schedules/__init__.py`; this line is a
 copy and can drift.
@@ -442,7 +443,7 @@ hiding them.
 Point clouds are a fourth switch (`ArePointCloudsHidden`) and are
 deliberately left alone, because nobody has asked for it.
 
-**AVH > Data > Flip Status**
+**AVH > Data > Doors > Flip Status**
 
 Records whether each family instance is mirrored or flipped, into
 parameters that can be scheduled and filtered. Revit knows all three
@@ -516,7 +517,7 @@ a hand flipped instance. If it is, the mirrored and hand columns will
 agree everywhere and one of them is redundant. That is a question about
 Revit's behaviour that no test outside Revit can answer.
 
-**AVH > Data > Door Room Check**
+**AVH > Data > Doors > Door Room Check**
 
 Makes a plan of one level showing which room each door actually takes its
 CCI ID from. Pick a level, and every door gets an arrow pointing into its
@@ -618,7 +619,8 @@ not in this code at all.
 | 2.14.1 | Grouped elements handled instead of walked into | Shipped |
 | 2.15.0 | Data panel: Door Room Check | pyRevit refused three scripts at startup |
 | 2.15.1 | Pushbutton scripts made ASCII; the dead guard actually removed | Worked |
-| 2.15.2 | Door Room Check: the phase is asked for, not assumed | Current |
+| 2.15.2 | Door Room Check: the phase is asked for, not assumed | Worked |
+| 2.16.0 | Flip Status and Door Room Check moved into a Doors pulldown | Current |
 
 The probes settled it: a script with `#! python3` fails, the same script
 without it works. **pyRevit's CPython engine fails to initialise in this
@@ -840,11 +842,22 @@ AVH.extension/
       Isolate Warnings.pushbutton/
     Data.panel/
       Room Data Sync.pushbutton/
-      Flip Status.pushbutton/
-      Door Room Check.pushbutton/
+      Doors.pulldown/
+        Flip Status.pushbutton/
+        Door Room Check.pushbutton/
     Forma.panel/
       Make Forma View.pushbutton/
 ```
+
+`Doors.pulldown` is a pulldown, so the two buttons inside it share one
+ribbon slot. The folder name is the label and `icon.png` beside the
+buttons is its icon; nothing else is needed. **Nesting a button one level
+deeper broke how every script found `lib`**, which they all did by
+walking up a fixed number of directories from `__file__`. They now search
+upward for the folder that contains `lib`, which does not care how deep
+the button sits, and rule 6 in `test_ironpython_compat.py` enforces it.
+The harnesses cannot: each puts `lib` on `sys.path` itself before running
+the script, so the script's own resolution is never exercised.
 
 No `bundle.yaml` on any button: it is optional, it is parsed before any
 Python runs, and it was eliminated while hunting the engine failure.

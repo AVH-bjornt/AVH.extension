@@ -249,6 +249,31 @@ for path in SHIPPED:
           if offenders else "")
 
 
+# --- rule 6: find lib by searching upward, not by counting levels ------
+#
+# Learned at 2.16.0, moving two buttons into a pulldown. Every pushbutton
+# script adds the extension's `lib` folder to sys.path, and they all did
+# it by walking up a fixed number of directories from __file__. A
+# pulldown adds one level, so the fixed count landed a directory short
+# and the scripts would have failed at import time with a message about
+# a module nobody has heard of.
+#
+# The harnesses cannot catch this: each one puts `lib` on sys.path itself
+# before running the script, so the script's own resolution never gets
+# exercised. Hence a static rule.
+
+for path in SHIPPED:
+    if os.path.basename(path) != "script.py":
+        continue
+    text = read(path)
+    if "_LIB_DIR" not in text:
+        continue
+    check("{0}: finds lib by searching upward".format(rel(path)),
+          "os.path.isdir(os.path.join(_EXT_DIR" in text,
+          "counts directory levels instead, which breaks the moment the "
+          "button is nested in a pulldown")
+
+
 # --- report -----------------------------------------------------------
 
 print("IronPython 2.7 compatibility")
