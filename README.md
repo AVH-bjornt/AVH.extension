@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.18.2.** The authoritative number is `__version__` in
+**Version 2.19.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -96,7 +96,7 @@ in the active view. Click again and the isolate clears. Shift click to
 pick which kind of warning to isolate, since most models are mostly
 "joined but do not intersect".
 
-**Selection > Zoom to Selection.** Zooms the active view to whatever is
+**Zoom to Selection.** Zooms the active view to whatever is
 selected, as one box with a margin. Stays in the view you are in and
 changes nothing in the model.
 
@@ -171,7 +171,8 @@ to Autodesk Forma from.
 | 2.17.1 | Moved into a Selection pulldown on Tools | Shipped |
 | 2.18.0 | Worksets panel: Datums to Workset | Views refused, as suspected |
 | 2.18.1 | Views dropped: grids and levels only | Worked |
-| 2.18.2 | README cut back to install, commands and versions | Current |
+| 2.18.2 | README cut back to install, commands and versions | Worked |
+| 2.19.0 | Zoom to Selection moved out of the pulldown onto Tools | Current |
 
 ## Notes for whoever maintains this
 
