@@ -898,7 +898,7 @@ AVH.extension/
   lib/avh_doorcheck/
     model.py    door states, arrow geometry and view naming, no Revit
   lib/avh_visibility/
-    model.py    which templates a category hide can reach, no Revit
+    model.py    which templates and views a hide can reach, no Revit
   lib/avh_selection/
     model.py    bounding box arithmetic and margins, no Revit
   lib/avh_worksets/
@@ -985,6 +985,7 @@ python test_door_room_check_harness.py
 python test_zoom_selection_harness.py
 python test_datums_workset_harness.py
 python test_hide_in_template_harness.py
+python test_hide_across_views_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -1305,6 +1306,66 @@ first version opened and committed a transaction even when every picked
 template was already in the wanted state, which leaves an undo step that
 undoes nothing. The state is now worked out by reading, before any
 transaction is opened.
+
+## Hide Across Views, and why it is a second button
+
+Hide in Template reaches categories through a template. This one reaches
+**elements**, which a template cannot carry at all, so the two are not
+two scopes on one job. They are two jobs against two different parts of
+the API, and neither can do the other's.
+
+The element hide is stored on the view and no template controls it, so
+the element route works on every view picked. The category route, on
+shift click, is the one that collides: a view whose template owns
+Visibility / Graphics accepts the write and keeps showing the category.
+Those views are separated out, never written to, and the report names
+Hide in Template as the button that can reach them.
+
+### Eligibility is asked late, on purpose
+
+Whether a given element can be hidden in a given view is one API call per
+element per view. Asking that of two hundred views before the picker
+opens would make the button feel broken. The picker is built from cheap
+per view data, and `CanBeHidden` and `IsHidden` are asked only of the
+views actually picked.
+
+### All or nothing across views
+
+One view refusing rolls the entire run back rather than leaving thirty
+nine views changed and one not. A reported failure is recoverable; a
+drawing set half changed by a tool whose effect is invisible in the
+browser is not. The spec written before the build said the opposite, on
+the grounds that this tool "only changes visibility" and so could follow
+the Isolate Warnings rule. That was wrong: a permanent hide is a write to
+the model, and the Isolate Warnings reasoning only ever applied because
+its isolate is temporary.
+
+### What the mutations proved
+
+The suite is 48 checks. Breaking the behaviour on purpose:
+
+- write categories onto template owned views anyway: 5 fail
+- ignore what a view can actually show: 4 fail
+- write regardless of the current hidden state: 4 fail
+- ignore the commit status: 3 fail
+- commit the views that worked instead of rolling back: 2 fail
+- offer view templates in the picker: 2 fail
+- offer sheets, schedules and legends: 1 fails
+- never attach a failure preprocessor: 1 fails
+
+Ignoring the commit status originally failed **one** check, because the
+fake restores state on a rollback whether or not the script noticed, so
+only the wording of the report gave it away. Two checks were added that
+the report does not claim a view was changed. A false success is the most
+expensive failure this codebase has had, and one check was too thin a net
+for it.
+
+### Known duplication
+
+`selection()` here and `selected_categories()` in Hide in Template do the
+same job. They are deliberately not shared yet: folding them into one
+reader moves both buttons at once and neither has been run in Revit.
+Fold them once both are confirmed.
 
 ## Working on this
 

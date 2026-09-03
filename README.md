@@ -174,6 +174,7 @@ to Autodesk Forma from.
 | 2.18.2 | README cut back to install, commands and versions | Worked |
 | 2.19.0 | Zoom to Selection moved out of the pulldown onto Tools | Worked |
 | 2.20.0 | Tools panel: Hide in Template | Shipped, untested in Revit |
+| 2.21.0 | Tools panel: Hide Across Views | Shipped, untested in Revit |
 
 ## Notes for whoever maintains this
 
