@@ -897,6 +897,8 @@ AVH.extension/
     model.py    flip state to parameter values, no Revit
   lib/avh_doorcheck/
     model.py    door states, arrow geometry and view naming, no Revit
+  lib/avh_visibility/
+    model.py    which templates a category hide can reach, no Revit
   lib/avh_selection/
     model.py    bounding box arithmetic and margins, no Revit
   lib/avh_worksets/
@@ -982,6 +984,7 @@ python test_flip_status_harness.py
 python test_door_room_check_harness.py
 python test_zoom_selection_harness.py
 python test_datums_workset_harness.py
+python test_hide_in_template_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -1235,6 +1238,73 @@ document's history. **A mock that is wrong in the safe direction hides
 bugs; one wrong in this direction invents them, and costs a debugging
 session aimed at code that was fine. When several unrelated checks fail
 at once, suspect the harness before the code.**
+
+## Hide in Template, and the parameter it has to take over
+
+A view template carries category visibility, filters and V/G overrides.
+It carries **no per element hide list**, because an element hide is
+stored on the view. So there is no way to hide one door in a template,
+and this tool works on the categories of the selection instead.
+
+The expensive part is that a template only governs the parameters it
+controls. Writing a category hide into a template that does not control
+Visibility / Graphics is accepted by Revit and changes nothing anybody
+can see, so a tool that wrote and reported success would be lying about
+a drawing set.
+
+Switching that parameter on is the fix and it is destructive: the
+template takes over category visibility for every view using it, and
+whatever those views show or hide today is replaced. It cannot be undone
+by unticking the box afterwards.
+
+So the run, in order:
+
+1. Reads which parameters each picked template controls, and which ones
+   it does not even offer. A template that does not offer the parameter
+   is unreachable and its categories are reported, never attempted.
+2. Puts the templates that would be no-ops into a separate offer that
+   names them, names the parameter and **counts the views**, because the
+   view count is the number that should stop somebody.
+3. Takes control in its own transaction, committed before anything is
+   written, so the write either lands somewhere visible or does not
+   happen.
+4. Declining skips those templates and still writes the rest.
+
+Same shape as the vary across groups flag in Flip Status, and the same
+reason: **reporting a hazard and then walking into it is worse than not
+checking for it.**
+
+### Dialogs abort here, unlike Isolate Warnings
+
+Isolate Warnings falls back to isolating everything when its picker
+breaks, because losing the filter is an inconvenience while aborting is a
+dead button. This tool writes to the model, so a dialog that fails means
+nobody confirmed anything and the run stops. Third instance of the same
+rule producing opposite answers in one codebase, and it is decided by
+whether the tool writes.
+
+### What the mutations proved
+
+The suite is 58 checks. Breaking the behaviour on purpose:
+
+- write to templates that do not control V/G anyway: 11 fail
+- pass blocked categories to Revit anyway: 6 fail
+- ignore the commit status: 4 fail
+- write every pair regardless of its current state: 2 fail
+- never attach a failure preprocessor: 1 fails
+- count a template's views every time it appears: 1 fails
+
+The first mutation originally **aborted the suite** with a `ValueError`
+instead of failing a check, because an ordering assertion used
+`list.index` on a transaction that the mutation stopped happening. A
+check that crashes the run hides every check after it, so that one is now
+a function that returns False.
+
+The empty transaction was a real find rather than a test artefact. The
+first version opened and committed a transaction even when every picked
+template was already in the wanted state, which leaves an undo step that
+undoes nothing. The state is now worked out by reading, before any
+transaction is opened.
 
 ## Working on this
 

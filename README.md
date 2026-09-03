@@ -172,7 +172,8 @@ to Autodesk Forma from.
 | 2.18.0 | Worksets panel: Datums to Workset | Views refused, as suspected |
 | 2.18.1 | Views dropped: grids and levels only | Worked |
 | 2.18.2 | README cut back to install, commands and versions | Worked |
-| 2.19.0 | Zoom to Selection moved out of the pulldown onto Tools | Current |
+| 2.19.0 | Zoom to Selection moved out of the pulldown onto Tools | Worked |
+| 2.20.0 | Tools panel: Hide in Template | Shipped, untested in Revit |
 
 ## Notes for whoever maintains this
 
