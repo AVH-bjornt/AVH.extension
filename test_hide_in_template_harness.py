@@ -618,6 +618,23 @@ recorder = run_script(doc, uidoc, pick_all=True)
 check("and lands when that parameter is controlled",
       template.hidden.get(TAGS))
 
+class GuardlessTemplate(FakeView):
+    """A template where CanCategoryBeHidden cannot be asked."""
+
+    def CanCategoryBeHidden(self, category_id):
+        raise Exception("CanCategoryBeHidden is not available")
+
+
+template = GuardlessTemplate(100, u"AVH Plan 1:100", is_template=True,
+                             controls=(VIS_MODEL, VIS_ANNOTATION))
+doc, uidoc = build([walls_category()], [template])
+recorder = run_script(doc, uidoc, pick_all=True)
+check("a guard that cannot be asked does not block the write",
+      template.hidden.get(WALLS))
+check("and the reason is reported rather than swallowed",
+      u"CanCategoryBeHidden could not be asked" in recorder.text())
+
+
 # Write failures
 template = controlled_template(set_raises=True)
 doc, uidoc = build([walls_category()], [template])

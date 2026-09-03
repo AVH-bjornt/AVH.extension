@@ -604,6 +604,42 @@ check("an analytical only selection stops before the picker",
       u"cannot hide those" in recorder.text())
 check("and writes nothing", not free.hidden_categories)
 
+class GuardlessView(FakeView):
+    """A view where CanCategoryBeHidden cannot be asked.
+
+    This is the shape of the first real Revit run: every picked view came
+    back blocked and the dialog said "None of the views you picked can
+    take that", which is the same sentence Revit refusing would produce.
+    """
+
+    def CanCategoryBeHidden(self, category_id):
+        raise Exception("CanCategoryBeHidden is not available")
+
+
+element = FakeElement(10, walls())
+free = GuardlessView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("a guard that cannot be asked does not block the write",
+      free.hidden_categories.get(WALLS))
+check("and the reason is reported rather than swallowed",
+      u"CanCategoryBeHidden could not be asked" in recorder.text())
+
+
+class RefusingGuardView(FakeView):
+    def CanCategoryBeHidden(self, category_id):
+        return False
+
+
+element = FakeElement(10, walls())
+free = RefusingGuardView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("a clear no from Revit still blocks", not free.hidden_categories)
+check("and the dialog says Revit refused it, not just that it cannot",
+      u"Revit refused" in recorder.text())
+
+
 element = FakeElement(10, walls())
 free = FakeView(1, u"Level 1", hidden_categories={WALLS: True})
 doc, uidoc = build([element], [free])

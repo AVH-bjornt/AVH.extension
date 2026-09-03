@@ -123,7 +123,12 @@ def category_kind(category):
 
 
 def selection(doc, uidoc):
-    """(elements, categories) for the current selection.
+    """(elements, categories, category_ids) for the current selection.
+
+    The real `Category.Id` is carried through rather than rebuilt from
+    its number later. Reconstructing an ElementId from a value is a round
+    trip that can fail on its own, and there is no reason to take it when
+    the original object is right here.
 
     Duplicated from Hide in Template on purpose. Folding the two into a
     shared reader means both buttons move at once, and neither has been
@@ -133,10 +138,11 @@ def selection(doc, uidoc):
         selected = list(uidoc.Selection.GetElementIds())
     except BaseException as exc:
         logger.debug(to_text(exc))
-        return [], []
+        return [], [], {}
 
     elements = []
     entries = []
+    category_ids = {}
     for element_id in selected:
         try:
             element = doc.GetElement(element_id)
@@ -151,10 +157,11 @@ def selection(doc, uidoc):
         try:
             entries.append((category.Id, category.Name,
                             category_kind(category)))
+            category_ids[model.key_of(category.Id)] = category.Id
         except BaseException as exc:
             logger.debug(to_text(exc))
 
-    return elements, model.merge_categories(entries)
+    return elements, model.merge_categories(entries), category_ids
 
 
 def template_controls(doc, view, cache):
@@ -256,17 +263,34 @@ def enrich_for_elements(views, elements):
     return views
 
 
-def enrich_for_categories(views, categories):
-    """Ask Revit, per view, which of these categories it refuses."""
+def enrich_for_categories(views, categories, category_ids, notes):
+    """Ask Revit, per view, which of these categories it refuses.
+
+    Only a clear no blocks. If the question itself cannot be asked, the
+    reason is recorded and the category goes through, because a guard
+    that cannot run must not silently refuse everything: that turns a
+    broken call into "None of the views you picked can take that", which
+    is indistinguishable from Revit having refused.
+
+    Letting it through is safe. The write sits in one transaction with a
+    failure preprocessor and a checked commit, so if Revit does refuse,
+    the whole run rolls back and says so in Revit's own words.
+    """
     for entry in views:
         view = entry["view"]
         blocked = set()
         for category in model.supported(categories):
+            category_id = category_ids.get(category["key"])
+            if category_id is None:
+                continue
             try:
-                if not view.CanCategoryBeHidden(DB.ElementId(category["key"])):
-                    blocked.add(category["key"])
+                allowed = view.CanCategoryBeHidden(category_id)
             except BaseException as exc:
-                logger.debug(to_text(exc))
+                notes.add(u"CanCategoryBeHidden could not be asked "
+                          u"({0}), so it was not used as a guard".format(
+                              to_text(exc)))
+                continue
+            if not allowed:
                 blocked.add(category["key"])
         entry["blocked"] = blocked
     return views
@@ -474,15 +498,27 @@ def run_elements(doc, views, elements, hide):
         output.print_md("_Revit reported: {0}_".format(message))
 
 
-def run_categories(doc, views, categories, hide):
+def run_categories(doc, views, categories, category_ids, hide, notes):
     plan = model.category_plan(views, categories, hide)
 
     if not plan["ready"]:
-        message = "None of the views you picked can take that."
+        # Say which of the three reasons it was. A bare "cannot take
+        # that" is the same sentence whether Revit refused, a template
+        # owns it, or the guard itself fell over, and those need three
+        # different responses from whoever is reading it.
+        parts = ["None of the views you picked can take that."]
         advice = model.template_advice(plan["template"])
         if advice:
-            message = message + "\n\n" + advice
-        forms.alert(message, title=TITLE)
+            parts.append(advice)
+        if plan["blocked"]:
+            parts.append(
+                "Revit refused {0} in: {1}".format(
+                    model.category_names(plan["blocked"][0][1]),
+                    ", ".join(model.view_names(plan["blocked"])
+                              [:model.MAX_LISTED])))
+        for note in sorted(notes):
+            parts.append(note)
+        forms.alert("\n\n".join(parts), title=TITLE)
         return
 
     lines = [
@@ -502,7 +538,7 @@ def run_categories(doc, views, categories, hide):
     def apply_to_view(entry):
         view, cats = entry
         for category in cats:
-            category_id = DB.ElementId(category["key"])
+            category_id = category_ids[category["key"]]
             try:
                 current = view["view"].GetCategoryHidden(category_id)
             except BaseException:
@@ -531,6 +567,8 @@ def run_categories(doc, views, categories, hide):
     if plan["unsupported"]:
         output.print_md("_Not a category a view can hide: {0}._".format(
             model.category_names(plan["unsupported"])))
+    for note in sorted(notes):
+        output.print_md("_{0}_".format(note))
     for message in errors[:5]:
         output.print_md("_Revit reported: {0}_".format(message))
 
@@ -563,7 +601,8 @@ def run():
         forms.alert("No active Revit document.", title=TITLE)
         return
 
-    elements, categories = selection(doc, uidoc)
+    notes = set()
+    elements, categories, category_ids = selection(doc, uidoc)
     if not elements:
         forms.alert(
             "Select the elements you want hidden, then click again.",
@@ -596,8 +635,10 @@ def run():
     hide = to_text(direction).strip().lower() != "unhide"
 
     if by_category:
-        run_categories(doc, enrich_for_categories(chosen, categories),
-                       categories, hide)
+        run_categories(
+            doc,
+            enrich_for_categories(chosen, categories, category_ids, notes),
+            categories, category_ids, hide, notes)
     else:
         run_elements(doc, enrich_for_elements(chosen, elements),
                      elements, hide)

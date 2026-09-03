@@ -129,14 +129,20 @@ def category_kind(category):
 
 
 def selected_categories(doc, uidoc):
-    """The categories of the current selection, one entry each."""
+    """(categories, category_ids) for the current selection.
+
+    The real `Category.Id` is carried through rather than rebuilt from
+    its number later. Reconstructing an ElementId from a value is a round
+    trip that can fail on its own.
+    """
     try:
         selected = list(uidoc.Selection.GetElementIds())
     except BaseException as exc:
         logger.debug(to_text(exc))
-        return []
+        return [], {}
 
     entries = []
+    category_ids = {}
     for element_id in selected:
         try:
             element = doc.GetElement(element_id)
@@ -150,9 +156,10 @@ def selected_categories(doc, uidoc):
         try:
             entries.append((category.Id, category.Name,
                             category_kind(category)))
+            category_ids[model.key_of(category.Id)] = category.Id
         except BaseException as exc:
             logger.debug(to_text(exc))
-    return model.merge_categories(entries)
+    return model.merge_categories(entries), category_ids
 
 
 def view_counts(doc):
@@ -214,7 +221,8 @@ def controlled_kinds(view, categories):
     return controls, unavailable
 
 
-def gather_templates(doc, categories, active_template_id):
+def gather_templates(doc, categories, category_ids, active_template_id,
+                     notes):
     """Every view template in the model, described for the model layer."""
     counts = view_counts(doc)
     active_marker = model.key_of(active_template_id)
@@ -241,11 +249,22 @@ def gather_templates(doc, categories, active_template_id):
             if category["kind"] in unavailable:
                 blocked.add(category["key"])
                 continue
+            category_id = category_ids.get(category["key"])
+            if category_id is None:
+                continue
+            # Only a clear no blocks. A guard that cannot run must not
+            # silently refuse everything, which turns a broken call into
+            # "nothing can take it" and hides the real reason. The write
+            # rolls back on failure and reports Revit's own words, so
+            # letting it through is the safer of the two.
             try:
-                if not view.CanCategoryBeHidden(DB.ElementId(category["key"])):
-                    blocked.add(category["key"])
+                allowed = view.CanCategoryBeHidden(category_id)
             except BaseException as exc:
-                logger.debug(to_text(exc))
+                notes.add(u"CanCategoryBeHidden could not be asked "
+                          u"({0}), so it was not used as a guard".format(
+                              to_text(exc)))
+                continue
+            if not allowed:
                 blocked.add(category["key"])
 
         marker = model.key_of(view.Id)
@@ -435,7 +454,7 @@ def take_control(doc, pending):
     return granted
 
 
-def pending_writes(entries, hide):
+def pending_writes(entries, category_ids, hide):
     """(todo, already) worked out by reading, before any transaction.
 
     Only write what changes. Rewriting the same state onto every template
@@ -449,7 +468,8 @@ def pending_writes(entries, hide):
         view = template["view"]
         for category in cats:
             try:
-                current = view.GetCategoryHidden(DB.ElementId(category["key"]))
+                current = view.GetCategoryHidden(
+                    category_ids[category["key"]])
             except BaseException:
                 current = None
             if current is not None and bool(current) == bool(hide):
@@ -459,7 +479,7 @@ def pending_writes(entries, hide):
     return todo, already
 
 
-def apply_hides(doc, todo, hide):
+def apply_hides(doc, todo, category_ids, hide):
     """The write. Returns (changed, errors) or None if refused."""
     transaction = DB.Transaction(doc, TITLE)
     transaction.Start()
@@ -469,7 +489,7 @@ def apply_hides(doc, todo, hide):
     try:
         for template, category in todo:
             template["view"].SetCategoryHidden(
-                DB.ElementId(category["key"]), bool(hide))
+                category_ids[category["key"]], bool(hide))
             changed.append((template["name"], category["name"],
                             template["views"]))
     except BaseException as exc:
@@ -494,7 +514,7 @@ def apply_hides(doc, todo, hide):
     return changed, (record.errors if record is not None else [])
 
 
-def report(changed, already, plan_result, declined, hide):
+def report(changed, already, plan_result, declined, hide, notes=()):
     action = "Hidden" if hide else "Unhidden"
     output.print_md("### {0}".format(TITLE))
     output.print_md("**{0} in {1} template/category pair(s).**".format(
@@ -535,6 +555,9 @@ def report(changed, already, plan_result, declined, hide):
             "_Not reachable from a view template: {0}._".format(
                 model.category_names(plan_result["unsupported"])))
 
+    for note in sorted(notes):
+        output.print_md("_{0}_".format(note))
+
 
 def run():
     doc = revit.doc
@@ -547,7 +570,8 @@ def run():
         forms.alert("No active Revit document.", title=TITLE)
         return
 
-    categories = selected_categories(doc, uidoc)
+    notes = set()
+    categories, category_ids = selected_categories(doc, uidoc)
     if not categories:
         forms.alert(
             "Select the elements whose categories you want hidden, then "
@@ -566,7 +590,8 @@ def run():
     if view is not None:
         active_template_id = getattr(view, "ViewTemplateId", None)
 
-    templates = gather_templates(doc, categories, active_template_id)
+    templates = gather_templates(doc, categories, category_ids,
+                                 active_template_id, notes)
     if not templates:
         forms.alert("This model has no view templates.", title=TITLE)
         return
@@ -596,9 +621,9 @@ def run():
             "take it were set aside.", title=TITLE)
         return
 
-    todo, already = pending_writes(entries, hide)
+    todo, already = pending_writes(entries, category_ids, hide)
     if not todo:
-        report([], already, dry, declined, hide)
+        report([], already, dry, declined, hide, notes)
         forms.alert(
             "Every template you picked already shows those categories "
             "that way, so nothing was changed.", title=TITLE)
@@ -607,12 +632,12 @@ def run():
     if not confirm(entries, categories, hide):
         return
 
-    written = apply_hides(doc, todo, hide)
+    written = apply_hides(doc, todo, category_ids, hide)
     if written is None:
         return
 
     changed, errors = written
-    report(changed, already, dry, declined, hide)
+    report(changed, already, dry, declined, hide, notes)
     for message in errors[:5]:
         output.print_md("_Revit reported: {0}_".format(message))
 

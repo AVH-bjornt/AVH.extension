@@ -1360,6 +1360,50 @@ the report does not claim a view was changed. A false success is the most
 expensive failure this codebase has had, and one check was too thin a net
 for it.
 
+### The first Revit run: every view came back blocked
+
+Shift click on a real model produced "None of the views you picked can
+take that", with no template advice line, meaning every picked view had
+landed in `blocked`. That set is filled from one call,
+`View.CanCategoryBeHidden`, and the code did this:
+
+```
+try:
+    if not view.CanCategoryBeHidden(DB.ElementId(category["key"])):
+        blocked.add(category["key"])
+except BaseException:
+    blocked.add(category["key"])          # wrong
+```
+
+**A guard that cannot run must not silently refuse everything.** That
+except branch makes a broken call produce exactly the same sentence as
+Revit legitimately refusing, so the dialog could not tell the two apart
+and neither could the person reading it. It is the "silence is the
+dangerous outcome" rule in its purest form: the failure and the correct
+answer were made to look identical.
+
+Two changes at 2.21.1, both correct regardless of what the root cause
+turns out to be:
+
+1. **Only a clear no blocks.** If the question cannot be asked, the
+   reason is recorded and the category goes through. That is safe here
+   because the write is one transaction with a failure preprocessor and a
+   checked commit, so a genuine refusal rolls the whole run back and
+   reports Revit's own words. Letting Revit answer beats a guard that
+   cannot.
+2. **The real `Category.Id` is carried through** instead of being rebuilt
+   with `DB.ElementId(value)` later. `ElementId` is overloaded and
+   `Value` is an Int64 on Revit 2024 and newer, so the reconstruction was
+   a round trip that could fail on its own. There was never a reason to
+   take it: the original object was already in hand.
+
+The dialog now names which of the three reasons applied: Revit refused
+it, a template owns it, or the guard itself fell over and here is the
+exception. Whichever comes back next names the cause.
+
+Both buttons had this bug. Hide in Template shipped first and would have
+hit the same wall.
+
 ### Known duplication
 
 `selection()` here and `selected_categories()` in Hide in Template do the
