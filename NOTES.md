@@ -1626,12 +1626,17 @@ That last one is why the ambiguity check refuses per candidate rather
 than aborting the whole resolution. Aborting would have failed a run that
 had a perfectly good answer sitting in the next parameter.
 
-**Open noise.** The ambiguity line appears in the confirmation next to a
-successful resolution, where it reads as a warning about something that
-did not go wrong. Warning fatigue in this dialog is a real cost, because
-the dialog's whole value is that somebody reads it. Moving per candidate
-ambiguity to the output window when a view did resolve is the fix, not
-yet made.
+**Fixed at 2.22.5.** That ambiguity line appeared in the confirmation
+next to a successful resolution, where it read as a warning about
+something that did not go wrong. A near miss now goes to the output
+window when another parameter resolved, and stays in the dialog when
+nothing did, which is the only case where it is the whole story.
+
+Björn's reason for wanting it moved is the right one and worth writing
+down: **other people will use these buttons, and a warning about nothing
+teaches them to stop reading the dialog.** Every safeguard in both tools
+is a sentence in that dialog, so the cost of one false alarm is not the
+alarm, it is every real one after it.
 
 ### Known duplication
 

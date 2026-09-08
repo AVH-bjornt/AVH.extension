@@ -182,6 +182,7 @@ to Autodesk Forma from.
 | 2.22.2 | A section marker is a Viewer, not a ViewSection; followed to its view | VIEWER_VIEW_NAME does not exist |
 | 2.22.3 | The marker's own parameters are read instead of a parameter name being guessed | Ran, resolved to the wrong view |
 | 2.22.4 | View templates excluded, disagreeing parameters refuse, the resolved view is named | Worked, Sections confirmed |
+| 2.22.5 | A near miss beside a successful resolution goes to the output window, not the dialog | Shipped |
 
 ## Notes for whoever maintains this
 

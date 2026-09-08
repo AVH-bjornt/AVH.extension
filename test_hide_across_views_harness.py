@@ -374,6 +374,12 @@ class Recorder(object):
     def confirm_text(self):
         return u"\n".join(self.confirms)
 
+    def alert_text(self):
+        return u"\n".join(self.alerts)
+
+    def output_text(self):
+        return u"\n".join(self.printed)
+
 
 def run_script(doc, uidoc, pick=None, pick_all=False, direction="Hide",
                confirm_answer=True, shift=False, picker_raises=False,
@@ -779,7 +785,7 @@ free = FakeView(1, u"Level 1")
 doc, uidoc = build([viewer], [free, twin_a, twin_b])
 recorder = run_script(doc, uidoc, pick_all=True, shift=True)
 check("two views sharing a name refuse rather than pick one",
-      u"2 views carry that name" in recorder.text())
+      u"2 views carry that name" in recorder.alert_text())
 check("and write nothing", not free.hidden_categories)
 
 # A view template has a ViewType like any view, so an id parameter
@@ -834,6 +840,40 @@ check("and the parameter it came through",
       u"parameter View" in recorder.confirm_text())
 check("and the output window records the resolution",
       u"what the marker points at" in recorder.text())
+
+# The real shape from Eldisgardur: one parameter holds "Snid" and six
+# views are named that, while another names the view exactly. The near
+# miss must not be dressed up as a problem beside a successful run.
+section = FakeView(2, u"Langsnid - Dependent 2", vtype="Section")
+noise = [FakeView(20 + i, u"Snid", vtype="Section") for i in range(6)]
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[
+                        FakeParameter(u"Family", string=u"Snid"),
+                        FakeParameter(u"View Name",
+                                      string=u"Langsnid - Dependent 2")])
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([viewer], [free, section] + noise)
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("the good parameter still wins past an ambiguous one",
+      free.hidden_categories.get(SECTIONS) is True,
+      repr(free.hidden_categories))
+check("the near miss is kept out of the confirmation",
+      u"was not followed" not in recorder.confirm_text())
+check("and out of every dialog", u"was not followed"
+      not in recorder.alert_text())
+check("but is recorded in the output window",
+      u"was not followed" in recorder.output_text())
+
+# When nothing resolves, the near miss is the whole story and belongs in
+# front of the user.
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[FakeParameter(u"Family", string=u"Snid")])
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([viewer], [free] + noise)
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("a near miss with no winner is said out loud",
+      u"was not followed" in recorder.alert_text())
+check("and nothing is written", not free.hidden_categories)
 
 viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
                     parameters=[FakeParameter(u"Scale", string=u"1:50",

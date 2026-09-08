@@ -179,7 +179,7 @@ def builtin_of(parameter):
         return u""
 
 
-def view_candidates(doc, element, notes):
+def view_candidates(doc, element):
     """Every view this element points at, and the parameter that said so.
 
     Two routes, both measured rather than named. A parameter whose
@@ -191,12 +191,17 @@ def view_candidates(doc, element, notes):
     answer, which is one of the two ways this returned Elevation for a
     section.
 
-    Returns a list of (view, parameter name).
+    Returns (candidates, ambiguous). A candidate is (view, parameter
+    name). `ambiguous` are parameters that matched several views, which
+    is only worth a dialog when nothing else resolved: beside a
+    successful resolution it reads as a warning about something that did
+    not go wrong, and a dialog that cries wolf stops being read.
     """
     found = []
+    ambiguous = []
     parameters = parameters_of(element)
     if not parameters:
-        return found
+        return found, ambiguous
 
     for parameter in parameters:
         try:
@@ -225,7 +230,7 @@ def view_candidates(doc, element, notes):
                 continue
     except BaseException as exc:
         logger.debug(to_text(exc))
-        return found
+        return found, ambiguous
 
     for parameter in parameters:
         try:
@@ -236,16 +241,17 @@ def view_candidates(doc, element, notes):
             continue
         matched = by_name[value]
         if len(matched) != 1:
-            notes.add(u"{0} names a view {1}, and {2} views carry that "
-                      u"name, so it is ambiguous.".format(
-                          element_class(element), value, len(matched)))
+            ambiguous.append(
+                u"The parameter {0} names a view {1}, and {2} views carry "
+                u"that name, so it was not followed.".format(
+                    parameter_name(parameter), value, len(matched)))
             continue
         found.append((matched[0], parameter_name(parameter)))
 
-    return found
+    return found, ambiguous
 
 
-def describe_candidates(candidates):
+def describe_candidates(candidates, ambiguous=()):
     """Print what was resolved and from where, every time.
 
     This ran once, resolved to the wrong view, said only the category
@@ -260,6 +266,8 @@ def describe_candidates(candidates):
                                 source, to_text(view.Name),
                                 model.view_type_name(
                                     getattr(view, "ViewType", u""))))
+        for line in ambiguous:
+            output.print_md("- _{0}_".format(line))
     except BaseException as exc:
         logger.debug(to_text(exc))
 
@@ -316,8 +324,11 @@ def view_type_of_marker(doc, element, notes):
     if view_type is not None:
         return view_type
 
-    candidates = view_candidates(doc, element, notes)
+    candidates, ambiguous = view_candidates(doc, element)
     if not candidates:
+        # Nothing resolved, so every near miss is worth saying out loud.
+        for line in ambiguous:
+            notes.add(line)
         notes.add(u"{0} has no ViewType, and nothing it carries points at "
                   u"a view, so the marker could not be followed. What it "
                   u"does carry is listed in the output window.".format(
@@ -325,7 +336,7 @@ def view_type_of_marker(doc, element, notes):
         describe_element(doc, element)
         return None
 
-    describe_candidates(candidates)
+    describe_candidates(candidates, ambiguous)
 
     kinds = {}
     for view, source in candidates:
