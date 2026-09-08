@@ -1533,6 +1533,36 @@ Every failure along that route names the element's class first, so the
 next report starts from what Revit handed over rather than from what the
 code hoped for.
 
+### Three guesses at a parameter, then stop guessing
+
+2.22.2 followed the marker through `BuiltInParameter.VIEWER_VIEW_NAME`.
+Revit's answer: **that parameter does not exist here.** The class came
+back as plain `Element`, not `Viewer`.
+
+That was the third guess in a row about an object nobody had looked at:
+`ViewSection`, then `ViewType`, then a parameter name recalled from
+memory. Each one cost a release.
+
+**Naming a parameter is a guess. Reading what the element carries is a
+measurement, and it costs the same.** 2.22.3 does that:
+
+1. If the element has a `ViewType`, it is a view already.
+2. Otherwise every parameter is read, and any whose `AsElementId`
+   resolves to something with a `ViewType` **is** the view, whatever that
+   parameter happens to be called.
+3. Failing that, any parameter whose string matches exactly one view name
+   is the view. Two views sharing the name refuse rather than pick one.
+4. Failing all of that, the element itself is printed to the output
+   window: class, category, and every parameter with its
+   BuiltInParameter and value.
+
+Step 2 is the one that ends this. It works whatever the parameter is
+called, on any Revit version, in any interface language, because it never
+names anything.
+
+Step 4 is the lesson from the four releases before it. When a route
+fails, print the object, not another sentence about the object.
+
 ### Known duplication
 
 `selection()` here and `selected_categories()` in Hide in Template do the

@@ -167,7 +167,15 @@ class FakeDocument(object):
         self.ActiveView = active
 
     def GetElement(self, element_id):
-        return self.elements.get(element_id.Value)
+        # Views resolve by id too. Revit has one element table, and a
+        # fake that only knows the selection cannot follow a parameter
+        # holding a view id, which is exactly the route under test.
+        if element_id.Value in self.elements:
+            return self.elements[element_id.Value]
+        for view in self.views:
+            if view.Id.Value == element_id.Value:
+                return view
+        return None
 
     def snapshot(self):
         return [(view, view.snapshot()) for view in self.views]
@@ -662,23 +670,6 @@ check("the change of scope is stated before the write",
       u"marker categories are used instead" in recorder.confirm_text())
 
 
-class FakeViewer(object):
-    """Category Views, no ViewType, VIEWER_VIEW_NAME naming its view."""
-
-    def __init__(self, category, view_name):
-        self.Category = category
-        self.Name = u"Section 79"
-        self.view_name = view_name
-
-    def GetType(self):
-        return Namespace(Name=u"Viewer")
-
-    def get_Parameter(self, builtin):
-        if builtin != "VIEWER_VIEW_NAME":
-            return None
-        return Namespace(AsString=lambda: self.view_name)
-
-
 class FakeSectionView(object):
     """A plain view with a ViewType. This button's FakeView is a
     template, so a section needs its own light stand in."""
@@ -697,14 +688,31 @@ class FakeSectionView(object):
         pass
 
 
+class FakeViewer(object):
+    """Category Views, class Element, no ViewType, no view name
+    parameter. The route is read off the parameters it carries."""
+
+    def __init__(self, category, parameters=()):
+        self.Category = category
+        self.Name = u"Section 79"
+        self.Parameters = list(parameters)
+
+    def GetType(self):
+        return Namespace(Name=u"Element")
+
+
 template = controlled_template()
-doc, uidoc = build([FakeCategory(VIEWS, u"Views", "Internal")],
-                   [template])
+doc, uidoc = build([FakeCategory(VIEWS, u"Views", "Internal")], [template])
 doc.views.append(FakeSectionView(500, u"Section 79"))
-doc.elements[1] = FakeViewer(FakeCategory(VIEWS, u"Views", "Internal"),
-                             u"Section 79")
+doc.elements[1] = FakeViewer(
+    FakeCategory(VIEWS, u"Views", "Internal"),
+    parameters=[Namespace(
+        Definition=Namespace(Name=u"View", BuiltInParameter=u""),
+        AsElementId=lambda: FakeId(500),
+        AsString=lambda: None,
+        AsValueString=lambda: None)])
 recorder = run_script(doc, uidoc, pick_all=True)
-check("a Viewer is followed to its view in the template button too",
+check("a marker is followed to its view in the template button too",
       template.hidden.get(SECTIONS) is True, repr(template.hidden))
 
 

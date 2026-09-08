@@ -131,7 +131,7 @@ def why_no_marker(notes):
     """
     reasons = [note for note in sorted(notes)
                if u"ViewType" in note or u"Category" in note
-               or u"VIEWER_VIEW_NAME" in note or u"stands for" in note]
+               or u"carry that name" in note or u"names a view" in note]
     if not reasons:
         return ""
     return "\n\n" + "\n".join(reasons)
@@ -148,74 +148,150 @@ def element_class(element):
             return u"an unknown element"
 
 
-def view_type_of_marker(doc, element, notes):
-    """The ViewType behind a selected marker, or None.
+def parameters_of(element):
+    """Every parameter on the element, or an empty list."""
+    try:
+        return list(element.Parameters)
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return []
 
-    Selecting a section marker in a plan does **not** hand back the
-    ViewSection. It hands back a `Viewer`, which sits in the Views
-    category and is not a View at all, so it has no `ViewType`. Its
-    VIEWER_VIEW_NAME parameter carries the name of the view it stands
-    for, and that is the route across.
 
-    Matching by name is not something to be pleased about. It is done
-    here because the parameter holds a name and nothing else, the match
-    is against views in this same document rather than against anything a
-    user typed, and an ambiguous match refuses rather than guesses.
+def parameter_name(parameter):
+    try:
+        return to_text(parameter.Definition.Name)
+    except BaseException:
+        return u"?"
+
+
+def builtin_of(parameter):
+    """Which BuiltInParameter this is, when it is one."""
+    try:
+        return to_text(parameter.Definition.BuiltInParameter)
+    except BaseException:
+        return u""
+
+
+def view_from_parameters(doc, element, notes):
+    """Find the view a marker stands for by asking, not by guessing.
+
+    Three attempts at this named a BuiltInParameter from memory and the
+    third one, VIEWER_VIEW_NAME, does not exist in this Revit at all.
+    Naming a parameter is a guess; reading what the element carries is a
+    measurement, and the measurement costs the same.
+
+    A parameter holding an ElementId that resolves to something with a
+    ViewType is the view. Failing that, a parameter holding a string that
+    matches exactly one view name is the view. An ambiguous string match
+    is refused rather than taken.
     """
-    view_type = getattr(element, "ViewType", None)
-    if view_type is not None:
-        return view_type
-
-    cls = element_class(element)
-    builtin = getattr(DB.BuiltInParameter, "VIEWER_VIEW_NAME", None)
-    if builtin is None:
-        notes.add(u"{0} has no ViewType, and this Revit has no "
-                  u"VIEWER_VIEW_NAME parameter to follow.".format(cls))
+    parameters = parameters_of(element)
+    if not parameters:
         return None
 
-    try:
-        parameter = element.get_Parameter(builtin)
-    except BaseException as exc:
-        notes.add(u"{0}: reading VIEWER_VIEW_NAME failed: {1}".format(
-            cls, to_text(exc)))
-        return None
-    if parameter is None:
-        notes.add(u"{0} has no ViewType and carries no VIEWER_VIEW_NAME, "
-                  u"so the view it stands for is unknown.".format(cls))
-        return None
+    for parameter in parameters:
+        try:
+            target = doc.GetElement(parameter.AsElementId())
+        except BaseException:
+            continue
+        if target is None:
+            continue
+        if getattr(target, "ViewType", None) is not None:
+            return target
 
-    try:
-        name = to_text(parameter.AsString())
-    except BaseException as exc:
-        notes.add(u"{0}: VIEWER_VIEW_NAME could not be read: {1}".format(
-            cls, to_text(exc)))
-        return None
-    if not name:
-        notes.add(u"{0} has an empty VIEWER_VIEW_NAME.".format(cls))
-        return None
-
-    matches = []
+    by_name = {}
     try:
         for view in DB.FilteredElementCollector(doc).OfClass(DB.View):
             try:
                 if view.IsTemplate:
                     continue
-                if to_text(view.Name) == name:
-                    matches.append(view)
+                by_name.setdefault(to_text(view.Name), []).append(view)
             except BaseException:
                 continue
     except BaseException as exc:
-        notes.add(u"{0}: the views could not be listed: {1}".format(
-            cls, to_text(exc)))
+        logger.debug(to_text(exc))
         return None
 
-    if len(matches) != 1:
-        notes.add(u"{0} stands for a view named {1}, and {2} view(s) "
-                  u"carry that name, so it is ambiguous.".format(
-                      cls, name, len(matches)))
-        return None
+    for parameter in parameters:
+        try:
+            value = to_text(parameter.AsString())
+        except BaseException:
+            continue
+        if not value or value not in by_name:
+            continue
+        found = by_name[value]
+        if len(found) != 1:
+            notes.add(u"{0} names a view {1}, and {2} views carry that "
+                      u"name, so it is ambiguous.".format(
+                          element_class(element), value, len(found)))
+            continue
+        return found[0]
 
-    return getattr(matches[0], "ViewType", None)
+    return None
+
+
+def describe_element(doc, element):
+    """Print what this element actually is, to the output window.
+
+    Reached only when the marker could not be followed. Four releases
+    were spent reasoning about an element nobody had looked at, so when
+    this route fails it prints the element rather than another sentence
+    about it.
+    """
+    try:
+        output.print_md("### {0}: what was selected".format(TITLE))
+        output.print_md("- class: **{0}**".format(element_class(element)))
+        category = getattr(element, "Category", None)
+        if category is not None:
+            output.print_md("- category: **{0}**".format(
+                to_text(category.Name)))
+        rows = []
+        for parameter in parameters_of(element):
+            builtin = builtin_of(parameter)
+            value = u""
+            for reader in ("AsString", "AsValueString"):
+                try:
+                    value = to_text(getattr(parameter, reader)())
+                except BaseException:
+                    value = u""
+                if value:
+                    break
+            rows.append(u"- {0}{1}{2}".format(
+                parameter_name(parameter),
+                u"  [{0}]".format(builtin) if builtin else u"",
+                u" = {0}".format(value) if value else u""))
+        if rows:
+            output.print_md("Parameters:")
+            for row in rows[:60]:
+                output.print_md(row)
+        else:
+            output.print_md("_It carries no readable parameters._")
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+
+
+def view_type_of_marker(doc, element, notes):
+    """The ViewType behind a selected marker, or None.
+
+    Selecting a section marker in a plan does **not** hand back the
+    ViewSection. It hands back a separate element in the Views category
+    which is not a View, so it has no ViewType. What it does carry is
+    read off it rather than assumed.
+    """
+    view_type = getattr(element, "ViewType", None)
+    if view_type is not None:
+        return view_type
+
+    view = view_from_parameters(doc, element, notes)
+    if view is not None:
+        return getattr(view, "ViewType", None)
+
+    notes.add(u"{0} has no ViewType, and nothing it carries points at a "
+              u"view, so the marker could not be followed. What it does "
+              u"carry is listed in the output window.".format(
+                  element_class(element)))
+    describe_element(doc, element)
+    return None
 
 
 def marker_category(doc, element, notes):

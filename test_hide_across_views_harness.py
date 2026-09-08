@@ -113,41 +113,45 @@ class FakeElement(object):
         return self.Id.Value in view.hidden_elements
 
 
-VIEWER_VIEW_NAME = "VIEWER_VIEW_NAME"
-
-
 class FakeParameter(object):
-    def __init__(self, value):
-        self.value = value
+    """Carries whichever of the two readers the route uses."""
+
+    def __init__(self, name, builtin=u"", string=None, element_id=None):
+        self.Definition = Namespace(Name=name, BuiltInParameter=builtin)
+        self.string = string
+        self.element_id = element_id
 
     def AsString(self):
-        return self.value
+        if self.string is None:
+            raise Exception("not a string parameter")
+        return self.string
+
+    def AsValueString(self):
+        return self.AsString()
+
+    def AsElementId(self):
+        if self.element_id is None:
+            raise Exception("not an element id parameter")
+        return self.element_id
 
 
 class FakeViewer(object):
     """What Revit actually hands back when a section marker is selected.
 
-    Category Views, no ViewType, and a VIEWER_VIEW_NAME parameter naming
-    the view it stands for. Modelling this is the whole point: the first
-    three attempts were aimed at a ViewSection that never arrives.
+    Category Views, class Element, no ViewType, and no VIEWER_VIEW_NAME:
+    that parameter does not exist in this Revit. Whatever route there is
+    has to be read off the parameters it does carry.
     """
 
-    def __init__(self, key, category, view_name, parameter=True,
-                 name=u"Section 79"):
+    def __init__(self, key, category, parameters=(), name=u"Section 79"):
         self.Id = FakeId(key)
         self.Category = category
         self.Name = name
-        self.view_name = view_name
-        self.parameter = parameter
+        self.Parameters = list(parameters)
         self.hideable_in = None
 
     def GetType(self):
-        return Namespace(Name=u"Viewer")
-
-    def get_Parameter(self, builtin):
-        if not self.parameter or builtin != VIEWER_VIEW_NAME:
-            return None
-        return FakeParameter(self.view_name)
+        return Namespace(Name=u"Element")
 
     def CanBeHidden(self, view):
         return True
@@ -422,8 +426,7 @@ def run_script(doc, uidoc, pick=None, pick_all=False, direction="Hide",
         View=FakeView,
         FilteredElementCollector=FakeCollector,
         BuiltInParameter=Namespace(VIS_GRAPHICS_MODEL=VIS_MODEL,
-                                   VIS_GRAPHICS_ANNOTATION=VIS_ANNOTATION,
-                                   VIEWER_VIEW_NAME=VIEWER_VIEW_NAME),
+                                   VIS_GRAPHICS_ANNOTATION=VIS_ANNOTATION),
         CategoryType=Namespace(Model="Model", Annotation="Annotation"),
         Category=Namespace(GetCategory=get_category),
         BuiltInCategory=(Namespace() if no_builtin
@@ -741,48 +744,58 @@ check("and writes nothing", not free.hidden_categories)
 check("and the refusal names the ViewType it actually saw",
       u"ViewType ThreeD has no marker category" in recorder.text())
 
-# The real thing: a Viewer, not a ViewSection.
-viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
-                    u"Section 79")
+# The real thing: an element in the Views category with no ViewType and
+# no VIEWER_VIEW_NAME. The route has to be read off what it carries.
 section = FakeView(2, u"Section 79", vtype="Section")
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[FakeParameter(u"View", element_id=FakeId(2))])
 free = FakeView(1, u"Level 1")
 doc, uidoc = build([viewer], [free, section])
 recorder = run_script(doc, uidoc, pick_all=True, shift=True)
-check("a Viewer is followed to the view it stands for",
-      free.hidden_categories.get(SECTIONS) is True,
+check("a parameter holding the view's id is followed, whatever it is "
+      "called", free.hidden_categories.get(SECTIONS) is True,
       repr(free.hidden_categories))
 check("and the Views category is still never written to",
       VIEWS not in free.hidden_categories)
 
+section = FakeView(2, u"Section 79", vtype="Section")
 viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
-                    u"Section 79", parameter=False)
+                    parameters=[FakeParameter(u"Sheet Number",
+                                              string=u"A101"),
+                                FakeParameter(u"Name",
+                                              string=u"Section 79")])
 free = FakeView(1, u"Level 1")
-doc, uidoc = build([viewer], [free])
+doc, uidoc = build([viewer], [free, section])
 recorder = run_script(doc, uidoc, pick_all=True, shift=True)
-check("a Viewer with no view name parameter names its own class",
-      u"Viewer" in recorder.text()
-      and u"VIEWER_VIEW_NAME" in recorder.text())
+check("failing that, a parameter naming the view is followed",
+      free.hidden_categories.get(SECTIONS) is True)
 
-viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
-                    u"Section 79")
-free = FakeView(1, u"Level 1")
-doc, uidoc = build([viewer], [free])
-recorder = run_script(doc, uidoc, pick_all=True, shift=True)
-check("a name matching no view refuses rather than guessing",
-      u"0 view(s) carry that name" in recorder.text())
-check("and writes nothing", not free.hidden_categories)
-
-viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
-                    u"Section 79")
-free = FakeView(1, u"Level 1")
 twin_a = FakeView(2, u"Section 79", vtype="Section")
 twin_b = FakeView(3, u"Section 79", vtype="Elevation")
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[FakeParameter(u"Name",
+                                              string=u"Section 79")])
+free = FakeView(1, u"Level 1")
 doc, uidoc = build([viewer], [free, twin_a, twin_b])
 recorder = run_script(doc, uidoc, pick_all=True, shift=True)
-check("an ambiguous name refuses rather than picking one",
-      u"2 view(s) carry that name" in recorder.text())
-check("and writes nothing on an ambiguous match",
-      not free.hidden_categories)
+check("two views sharing a name refuse rather than pick one",
+      u"2 views carry that name" in recorder.text())
+check("and write nothing", not free.hidden_categories)
+
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[FakeParameter(u"Scale", string=u"1:50",
+                                              builtin=u"VIEW_SCALE")])
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([viewer], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("an element that points at no view says so",
+      u"nothing it carries points at a view" in recorder.text())
+check("and prints what it actually is, rather than another sentence "
+      "about it", u"what was selected" in recorder.text())
+check("naming its class", u"Element" in recorder.text())
+check("and listing the parameters it does carry",
+      u"Scale" in recorder.text() and u"VIEW_SCALE" in recorder.text())
+check("and writes nothing", not free.hidden_categories)
 
 element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
                       view_type="Section", name=u"Section 79")
