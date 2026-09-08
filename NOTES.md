@@ -1404,6 +1404,34 @@ exception. Whichever comes back next names the cause.
 Both buttons had this bug. Hide in Template shipped first and would have
 hit the same wall.
 
+### A section marker is the Views category, and that is a dead end
+
+Shift click with a section selected in a plan reported "The selection is
+only Views, and a view cannot hide those". Correct, and useless.
+
+Selecting a section marker hands back the **ViewSection itself**, whose
+category is Views. `CategoryType` for Views is neither Model nor
+Annotation, so no view and no template can switch it off. The switch
+anybody would reach for is **Sections, under Annotation Categories**,
+which is a different category the selection cannot lead to.
+
+So the tool was right and the message still left the reader believing the
+thing they wanted was impossible, when the plain click does it: the
+element route hides the selected markers themselves, which is exactly
+Revit's own Hide in View, Elements. Both buttons now say that.
+
+**A refusal that does not name the route that works is only half a
+message.** The same failure as the guard above, one layer up: the tool
+knew enough to be useful and reported a wall instead.
+
+Not attempted: mapping a ViewSection to `OST_Sections` so shift click
+could reach the annotation category. The mapping depends on the view
+type, it cannot be verified outside Revit, and guessing it would put the
+wrong category in a dialog that writes to a drawing set. If the whole
+Sections category is what needs switching off, that wants a category
+picker rather than a selection, which is a design change rather than a
+fix.
+
 ### Known duplication
 
 `selection()` here and `selected_categories()` in Hide in Template do the

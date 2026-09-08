@@ -611,9 +611,26 @@ def run():
 
     by_category = shift_clicked()
     if by_category and not model.supported(categories):
+        # Selecting a section marker in a plan hands back the ViewSection
+        # itself, whose category is Views. Views is neither a model nor
+        # an annotation category, so no view and no template can switch
+        # it off, and the marker you can see is governed by Sections
+        # under Annotation Categories, which is a different category the
+        # selection cannot lead to. Saying only "a view cannot hide
+        # those" is true and useless: it leaves the reader believing the
+        # thing they want is impossible when the plain click does it.
         forms.alert(
-            "The selection is only {0}, and a view cannot hide "
-            "those.".format(model.category_names(categories)), title=TITLE)
+            "The selection is only {0}, which is not a category any view "
+            "or template can switch off.\n\n"
+            "A section, callout or elevation marker belongs to the Views "
+            "category. The switch you would reach for in Visibility / "
+            "Graphics is Sections, under Annotation Categories, and that "
+            "is a different category, so the selection cannot lead to "
+            "it.\n\n"
+            "To hide these particular markers, click without shift. The "
+            "element route hides the selected elements themselves and "
+            "works on sections.".format(
+                model.category_names(categories)), title=TITLE)
         return
 
     active = doc.ActiveView

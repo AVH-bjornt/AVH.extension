@@ -594,7 +594,9 @@ template = controlled_template()
 doc, uidoc = build([analytical_category()], [template])
 recorder = run_script(doc, uidoc, pick_all=True)
 check("an analytical only selection stops before any picker",
-      u"cannot control those" in recorder.text())
+      u"not a category any template can control" in recorder.text())
+check("and names the button that can do it instead",
+      u"Hide Across Views" in recorder.text())
 check("and writes nothing", not template.hidden)
 
 # A template that does not offer the parameter at all

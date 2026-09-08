@@ -579,9 +579,19 @@ def run():
         return
 
     if not model.supported(categories):
+        # See the note in Hide Across Views: a section marker selects the
+        # ViewSection, whose category is Views, and no template controls
+        # that. Naming the button that can do it beats a dead end.
         forms.alert(
-            "The selection is only {0}, and a view template cannot "
-            "control those.".format(model.category_names(categories)),
+            "The selection is only {0}, which is not a category any "
+            "template can control.\n\n"
+            "A section, callout or elevation marker belongs to the Views "
+            "category, and the switch in Visibility / Graphics is "
+            "Sections under Annotation Categories, a different category "
+            "the selection cannot lead to.\n\n"
+            "To hide these particular markers, use Hide Across Views "
+            "without shift, which hides the selected elements "
+            "themselves.".format(model.category_names(categories)),
             title=TITLE)
         return
 

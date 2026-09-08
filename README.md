@@ -176,6 +176,7 @@ to Autodesk Forma from.
 | 2.20.0 | Tools panel: Hide in Template | Shipped, untested in Revit |
 | 2.21.0 | Tools panel: Hide Across Views | Every view came back blocked on shift click |
 | 2.21.1 | A guard that cannot run no longer refuses everything; real Category.Id carried through | Awaiting a rerun |
+| 2.21.2 | An unreachable category now names the route that works instead of a dead end | Shipped |
 
 ## Notes for whoever maintains this
 

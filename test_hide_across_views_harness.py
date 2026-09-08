@@ -600,9 +600,25 @@ element = FakeElement(10, FakeCategory(ANALYTICAL, u"Analytical Walls",
 free = FakeView(1, u"Level 1")
 doc, uidoc = build([element], [free])
 recorder = run_script(doc, uidoc, pick_all=True, shift=True)
-check("an analytical only selection stops before the picker",
-      u"cannot hide those" in recorder.text())
+check("an unreachable category stops before the picker",
+      u"not a category any view or template can switch off"
+      in recorder.text())
 check("and writes nothing", not free.hidden_categories)
+
+# The real report from Revit: a section selected in a plan hands back the
+# ViewSection, whose category is Views and whose CategoryType is neither
+# Model nor Annotation.
+VIEWS = -2000279
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"))
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("a section marker names the category it actually is",
+      u"Views" in recorder.text())
+check("and is told the plain click does the job, not that it is "
+      "impossible", u"without shift" in recorder.text())
+check("and the Sections confusion is named rather than left to guess",
+      u"Annotation Categories" in recorder.text())
 
 class GuardlessView(FakeView):
     """A view where CanCategoryBeHidden cannot be asked.
