@@ -181,7 +181,7 @@ to Autodesk Forma from.
 | 2.22.1 | Every way the marker swap can fail now names itself in the dialog | Named it: no ViewType |
 | 2.22.2 | A section marker is a Viewer, not a ViewSection; followed to its view | VIEWER_VIEW_NAME does not exist |
 | 2.22.3 | The marker's own parameters are read instead of a parameter name being guessed | Ran, resolved to the wrong view |
-| 2.22.4 | View templates excluded, disagreeing parameters refuse, the resolved view is named | Shipped, untested in Revit |
+| 2.22.4 | View templates excluded, disagreeing parameters refuse, the resolved view is named | Worked, Sections confirmed |
 
 ## Notes for whoever maintains this
 

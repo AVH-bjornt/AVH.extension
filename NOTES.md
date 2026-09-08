@@ -1594,6 +1594,45 @@ correct.** That is the same rule as the silent returns, arrived at from
 the opposite direction: the first version said too little when it failed,
 this one said too little when it succeeded.
 
+### What the working run established
+
+Confirmed against Eldisgardur on 8 Sep 2026. The dialog reported:
+
+```
+Element names a view Snid, and 6 views carry that name, so it is ambiguous.
+Element was followed to the view Langsnid - Dependent 2 (Section)
+through the parameter View Name.
+```
+
+Three facts worth keeping, none of which were guessable:
+
+**The id route finds nothing.** The marker carries no parameter holding
+an ElementId that resolves to a view. Every attempt that assumed a
+typed link to the view was aimed at something that does not exist. What
+works is the **string route**, through a parameter literally called
+**View Name**.
+
+**Dependent views resolve fine.** The answer was
+`Langsnid - Dependent 2`, a dependent view, and its ViewType is Section
+like its parent. Nothing special was needed for that.
+
+**A second parameter matches many views by accident.** Something on the
+marker holds `Snid`, the Icelandic word for section, and six views in the
+model are named that. The ambiguity refusal did its job: it declined that
+candidate instead of picking one of six, and the run still succeeded on
+the parameter that was unambiguous.
+
+That last one is why the ambiguity check refuses per candidate rather
+than aborting the whole resolution. Aborting would have failed a run that
+had a perfectly good answer sitting in the next parameter.
+
+**Open noise.** The ambiguity line appears in the confirmation next to a
+successful resolution, where it reads as a warning about something that
+did not go wrong. Warning fatigue in this dialog is a real cost, because
+the dialog's whole value is that somebody reads it. Moving per candidate
+ambiguity to the output window when a view did resolve is the fix, not
+yet made.
+
 ### Known duplication
 
 `selection()` here and `selected_categories()` in Hide in Template do the
