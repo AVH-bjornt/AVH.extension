@@ -1563,6 +1563,37 @@ names anything.
 Step 4 is the lesson from the four releases before it. When a route
 fails, print the object, not another sentence about the object.
 
+### It resolved, and it resolved to the wrong view
+
+2.22.3 read the parameters, found a view, and switched off **Elevations**
+for a section. The route worked; the answer was wrong; and the
+confirmation said only "Hide Elevations in 6 view(s)", which was approved
+because there was nothing in it to disagree with.
+
+Two defects, both visible in the code once the symptom named the shape:
+
+**A view template was an acceptable answer.** The id route accepted
+anything with a `ViewType`, and a view template has one. An id parameter
+pointing at an elevation template was therefore a perfectly good match.
+Templates are now excluded.
+
+**The first candidate won.** Several parameters can resolve to views, and
+the code returned the first without ever noticing the others. It now
+gathers all of them, and **if they disagree on view kind it writes
+nothing** and names every candidate with the parameter it came from.
+Picking one of two silently is the failure that produced this report.
+
+**The confirmation named only the winner.** "Hide Elevations" is not
+something a person can check. "followed to the view East (Elevation)
+through the parameter Other" is. The resolved view, its kind and the
+parameter are now in the confirmation, and the whole resolution goes to
+the output window on every run whether it succeeds or not.
+
+**A resolution that cannot be checked afterwards is one nobody can
+correct.** That is the same rule as the silent returns, arrived at from
+the opposite direction: the first version said too little when it failed,
+this one said too little when it succeeded.
+
 ### Known duplication
 
 `selection()` here and `selected_categories()` in Hide in Template do the

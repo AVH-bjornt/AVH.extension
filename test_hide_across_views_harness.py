@@ -782,6 +782,59 @@ check("two views sharing a name refuse rather than pick one",
       u"2 views carry that name" in recorder.text())
 check("and write nothing", not free.hidden_categories)
 
+# A view template has a ViewType like any view, so an id parameter
+# pointing at one used to be taken as the answer. That is one of the two
+# ways a section resolved to Elevations.
+section = FakeView(2, u"Section 79", vtype="Section")
+elevation_template = FakeView(3, u"AVH Elevation", vtype="Elevation",
+                              is_template=True)
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[
+                        FakeParameter(u"Template", element_id=FakeId(3)),
+                        FakeParameter(u"View", element_id=FakeId(2))])
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([viewer], [free, section, elevation_template])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("a view template is never taken as the view a marker stands for",
+      free.hidden_categories.get(SECTIONS) is True,
+      repr(free.hidden_categories))
+check("so an elevation template cannot turn a section into Elevations",
+      ELEVATIONS not in free.hidden_categories)
+
+# Two parameters disagreeing is how Elevations got switched off for a
+# section: the first match won and the dialog showed only the winner.
+section = FakeView(2, u"Section 79", vtype="Section")
+elevation = FakeView(3, u"East", vtype="Elevation")
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[
+                        FakeParameter(u"Other", element_id=FakeId(3)),
+                        FakeParameter(u"View", element_id=FakeId(2))])
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([viewer], [free, section, elevation])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("parameters disagreeing writes nothing at all",
+      not free.hidden_categories)
+check("and both kinds are named, not just the winner",
+      u"Section" in recorder.text() and u"Elevation" in recorder.text())
+check("and the parameters they came from are named too",
+      u"Other" in recorder.text() and u"View" in recorder.text())
+
+# A resolution that cannot be checked afterwards is one nobody can
+# correct, so it is stated in the confirmation and in the output window.
+section = FakeView(2, u"Section 79", vtype="Section")
+viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                    parameters=[FakeParameter(u"View",
+                                              element_id=FakeId(2))])
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([viewer], [free, section])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("the confirmation names the view it resolved to",
+      u"Section 79" in recorder.confirm_text())
+check("and the parameter it came through",
+      u"parameter View" in recorder.confirm_text())
+check("and the output window records the resolution",
+      u"what the marker points at" in recorder.text())
+
 viewer = FakeViewer(10, FakeCategory(VIEWS, u"Views", "Internal"),
                     parameters=[FakeParameter(u"Scale", string=u"1:50",
                                               builtin=u"VIEW_SCALE")])

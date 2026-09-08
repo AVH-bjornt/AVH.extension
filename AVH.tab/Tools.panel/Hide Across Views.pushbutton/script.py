@@ -131,7 +131,8 @@ def why_no_marker(notes):
     """
     reasons = [note for note in sorted(notes)
                if u"ViewType" in note or u"Category" in note
-               or u"carry that name" in note or u"names a view" in note]
+               or u"carry that name" in note or u"names a view" in note
+               or u"more than one kind of view" in note]
     if not reasons:
         return ""
     return "\n\n" + "\n".join(reasons)
@@ -172,22 +173,24 @@ def builtin_of(parameter):
         return u""
 
 
-def view_from_parameters(doc, element, notes):
-    """Find the view a marker stands for by asking, not by guessing.
+def view_candidates(doc, element, notes):
+    """Every view this element points at, and the parameter that said so.
 
-    Three attempts at this named a BuiltInParameter from memory and the
-    third one, VIEWER_VIEW_NAME, does not exist in this Revit at all.
-    Naming a parameter is a guess; reading what the element carries is a
-    measurement, and the measurement costs the same.
+    Two routes, both measured rather than named. A parameter whose
+    `AsElementId` resolves to something with a `ViewType` is a candidate,
+    and so is one whose string matches exactly one view name.
 
-    A parameter holding an ElementId that resolves to something with a
-    ViewType is the view. Failing that, a parameter holding a string that
-    matches exactly one view name is the view. An ambiguous string match
-    is refused rather than taken.
+    **View templates are excluded.** A template has a `ViewType` like any
+    view, so an id parameter pointing at one used to be accepted as the
+    answer, which is one of the two ways this returned Elevation for a
+    section.
+
+    Returns a list of (view, parameter name).
     """
+    found = []
     parameters = parameters_of(element)
     if not parameters:
-        return None
+        return found
 
     for parameter in parameters:
         try:
@@ -196,8 +199,14 @@ def view_from_parameters(doc, element, notes):
             continue
         if target is None:
             continue
-        if getattr(target, "ViewType", None) is not None:
-            return target
+        if getattr(target, "ViewType", None) is None:
+            continue
+        try:
+            if target.IsTemplate:
+                continue
+        except BaseException:
+            pass
+        found.append((target, parameter_name(parameter)))
 
     by_name = {}
     try:
@@ -210,7 +219,7 @@ def view_from_parameters(doc, element, notes):
                 continue
     except BaseException as exc:
         logger.debug(to_text(exc))
-        return None
+        return found
 
     for parameter in parameters:
         try:
@@ -219,15 +228,34 @@ def view_from_parameters(doc, element, notes):
             continue
         if not value or value not in by_name:
             continue
-        found = by_name[value]
-        if len(found) != 1:
+        matched = by_name[value]
+        if len(matched) != 1:
             notes.add(u"{0} names a view {1}, and {2} views carry that "
                       u"name, so it is ambiguous.".format(
-                          element_class(element), value, len(found)))
+                          element_class(element), value, len(matched)))
             continue
-        return found[0]
+        found.append((matched[0], parameter_name(parameter)))
 
-    return None
+    return found
+
+
+def describe_candidates(candidates):
+    """Print what was resolved and from where, every time.
+
+    This ran once, resolved to the wrong view, said only the category
+    name in the confirmation, and was approved. A resolution that cannot
+    be checked afterwards is one nobody can correct.
+    """
+    try:
+        output.print_md("### {0}: what the marker points at".format(TITLE))
+        for view, source in candidates:
+            output.print_md("- parameter **{0}** points at *{1}* "
+                            "({2})".format(
+                                source, to_text(view.Name),
+                                model.view_type_name(
+                                    getattr(view, "ViewType", u""))))
+    except BaseException as exc:
+        logger.debug(to_text(exc))
 
 
 def describe_element(doc, element):
@@ -282,16 +310,45 @@ def view_type_of_marker(doc, element, notes):
     if view_type is not None:
         return view_type
 
-    view = view_from_parameters(doc, element, notes)
-    if view is not None:
-        return getattr(view, "ViewType", None)
+    candidates = view_candidates(doc, element, notes)
+    if not candidates:
+        notes.add(u"{0} has no ViewType, and nothing it carries points at "
+                  u"a view, so the marker could not be followed. What it "
+                  u"does carry is listed in the output window.".format(
+                      element_class(element)))
+        describe_element(doc, element)
+        return None
 
-    notes.add(u"{0} has no ViewType, and nothing it carries points at a "
-              u"view, so the marker could not be followed. What it does "
-              u"carry is listed in the output window.".format(
-                  element_class(element)))
-    describe_element(doc, element)
-    return None
+    describe_candidates(candidates)
+
+    kinds = {}
+    for view, source in candidates:
+        kind = model.view_type_name(getattr(view, "ViewType", u""))
+        kinds.setdefault(kind, []).append((view, source))
+
+    # Taking the first of several is how this switched off Elevations for
+    # a section. If the parameters disagree, nothing is written and all
+    # of them are named, because the tool cannot tell which is meant and
+    # neither can a dialog that only shows the winner.
+    if len(kinds) > 1:
+        notes.add(u"{0} points at more than one kind of view: {1}. It is "
+                  u"not clear which marker was meant, so nothing was "
+                  u"changed. The parameters are listed in the output "
+                  u"window.".format(
+                      element_class(element),
+                      u"; ".join(
+                          u"{0} via {1}".format(
+                              kind, u", ".join(source for _v, source
+                                               in entries))
+                          for kind, entries in sorted(kinds.items()))))
+        return None
+
+    kind = list(kinds.keys())[0]
+    view, source = kinds[kind][0]
+    notes.add(u"{0} was followed to the view {1} ({2}) through the "
+              u"parameter {3}.".format(
+                  element_class(element), to_text(view.Name), kind, source))
+    return getattr(view, "ViewType", None)
 
 
 def marker_category(doc, element, notes):
