@@ -177,7 +177,8 @@ to Autodesk Forma from.
 | 2.21.0 | Tools panel: Hide Across Views | Every view came back blocked on shift click |
 | 2.21.1 | A guard that cannot run no longer refuses everything; real Category.Id carried through | Awaiting a rerun |
 | 2.21.2 | An unreachable category now names the route that works instead of a dead end | Worked |
-| 2.22.0 | Shift click on a section, elevation or callout switches off its marker category | Shipped, Section confirmed by hand |
+| 2.22.0 | Shift click on a section, elevation or callout switches off its marker category | Swap did not fire, silently |
+| 2.22.1 | Every way the marker swap can fail now names itself in the dialog | Awaiting the reason |
 
 ## Notes for whoever maintains this
 

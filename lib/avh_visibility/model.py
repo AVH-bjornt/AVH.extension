@@ -456,9 +456,22 @@ MARKER_CATEGORIES = {
 }
 
 
+def view_type_name(view_type):
+    """The bare enum name, however the runtime renders it.
+
+    IronPython usually gives "Section" for a .NET enum, but a fully
+    qualified "Autodesk.Revit.DB.ViewType.Section" is a rendering the
+    lookup should survive rather than silently miss.
+    """
+    text = to_text(view_type).strip()
+    if u"." in text:
+        text = text.rsplit(u".", 1)[-1]
+    return text
+
+
 def marker_category_name(view_type):
     """The BuiltInCategory name governing this view's marker, or None."""
-    return MARKER_CATEGORIES.get(to_text(view_type))
+    return MARKER_CATEGORIES.get(view_type_name(view_type))
 
 
 def substitution_note(pairs):

@@ -80,8 +80,13 @@ MARKER_CATEGORIES = {
 }
 
 
+MISSING_CATEGORY = []
+
+
 def get_category(doc, builtin):
     """Stands in for DB.Category.GetCategory(doc, BuiltInCategory)."""
+    if MISSING_CATEGORY:
+        return None
     found = MARKER_CATEGORIES.get(builtin)
     if found is None:
         return None
@@ -326,7 +331,11 @@ class Recorder(object):
 def run_script(doc, uidoc, pick=None, pick_all=False, direction="Hide",
                confirm_answer=True, shift=False, picker_raises=False,
                switch_raises=False, options_raises=False,
-               commit_status="Committed"):
+               commit_status="Committed", no_builtin=False,
+               no_category=False):
+    del MISSING_CATEGORY[:]
+    if no_category:
+        MISSING_CATEGORY.append(True)
     FakeTransaction.committed = []
     FakeTransaction.rolled_back = []
     FakeTransaction.started = []
@@ -373,9 +382,10 @@ def run_script(doc, uidoc, pick=None, pick_all=False, direction="Hide",
                                    VIS_GRAPHICS_ANNOTATION=VIS_ANNOTATION),
         CategoryType=Namespace(Model="Model", Annotation="Annotation"),
         Category=Namespace(GetCategory=get_category),
-        BuiltInCategory=Namespace(OST_Sections="OST_Sections",
-                                  OST_Elev="OST_Elev",
-                                  OST_Callouts="OST_Callouts"),
+        BuiltInCategory=(Namespace() if no_builtin
+                         else Namespace(OST_Sections="OST_Sections",
+                                        OST_Elev="OST_Elev",
+                                        OST_Callouts="OST_Callouts")),
         FailureSeverity=Namespace(Warning="Warning"),
         FailureProcessingResult=Namespace(
             ProceedWithRollBack="RollBack", Continue="Continue"),
@@ -423,6 +433,14 @@ ordered = model.order_views([
     {"name": u"zulu", "vtype": u"Section", "active": False},
     {"name": u"alpha", "vtype": u"Section", "active": False},
     {"name": u"mike", "vtype": u"FloorPlan", "active": True}])
+check("a bare enum name resolves",
+      model.marker_category_name("Section") == u"OST_Sections")
+check("a fully qualified enum name resolves the same way",
+      model.marker_category_name("Autodesk.Revit.DB.ViewType.Section")
+      == u"OST_Sections")
+check("an unlisted view kind resolves to nothing",
+      model.marker_category_name("ThreeD") is None)
+
 check("the active view is offered first",
       [entry["name"] for entry in ordered] == [u"mike", u"alpha", u"zulu"])
 
@@ -665,6 +683,8 @@ check("an elevation resolves to its own category, not Sections",
       free.hidden_categories.get(ELEVATIONS) is True
       and SECTIONS not in free.hidden_categories)
 
+# Every way the swap can fail names itself. Four silent returns are how
+# the same dialog appeared twice with two different causes behind it.
 element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
                       view_type="ThreeD", name=u"{3D}")
 free = FakeView(1, u"Level 1")
@@ -674,6 +694,45 @@ check("a view kind with no marker category still refuses cleanly",
       u"not a category any view or template can switch off"
       in recorder.text())
 check("and writes nothing", not free.hidden_categories)
+check("and the refusal names the ViewType it actually saw",
+      u"ViewType ThreeD has no marker category" in recorder.text())
+
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                      name=u"no view type")
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("an element with no ViewType says so",
+      u"no ViewType" in recorder.text())
+
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                      view_type="Section", name=u"Section 79")
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True,
+                      no_builtin=True)
+check("a BuiltInCategory this Revit lacks says which one",
+      u"OST_Sections is not available" in recorder.text())
+
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                      view_type="Section", name=u"Section 79")
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True,
+                      no_category=True)
+check("a model without that category says so rather than going quiet",
+      u"has no OST_Sections category" in recorder.text())
+
+# IronPython usually renders a .NET enum bare, but a qualified name must
+# not silently miss the table.
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                      view_type="Autodesk.Revit.DB.ViewType.Section",
+                      name=u"Section 79")
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("a fully qualified ViewType still resolves",
+      free.hidden_categories.get(SECTIONS) is True)
 
 class GuardlessView(FakeView):
     """A view where CanCategoryBeHidden cannot be asked.

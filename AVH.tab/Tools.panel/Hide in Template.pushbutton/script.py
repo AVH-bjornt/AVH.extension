@@ -128,7 +128,21 @@ def category_kind(category):
     return model.OTHER
 
 
-def marker_category(doc, element):
+def why_no_marker(notes):
+    """The reason the marker swap did not happen, if there is one.
+
+    Four things can stop it and every one of them used to return None
+    without a word, which is how the same dialog appeared twice with two
+    different causes behind it. Whichever line comes back names the step.
+    """
+    reasons = [note for note in sorted(notes)
+               if u"ViewType" in note or u"Category" in note]
+    if not reasons:
+        return ""
+    return "\n\n" + "\n".join(reasons)
+
+
+def marker_category(doc, element, notes):
     """The annotation category governing a view element's marker.
 
     Returns (Category, source_name) or (None, None). Resolved through
@@ -137,24 +151,41 @@ def marker_category(doc, element):
     """
     view_type = getattr(element, "ViewType", None)
     if view_type is None:
+        notes.add(u"The selected element has no ViewType, so its marker "
+                  u"category could not be worked out.")
         return None, None
+
+    seen = model.view_type_name(view_type)
     name = model.marker_category_name(view_type)
     if not name:
+        notes.add(u"ViewType {0} has no marker category in the table. "
+                  u"Section, Elevation and Detail are the ones "
+                  u"listed.".format(seen))
         return None, None
+
     builtin = getattr(DB.BuiltInCategory, name, None)
     if builtin is None:
+        notes.add(u"BuiltInCategory {0} is not available in this Revit "
+                  u"(ViewType {1}).".format(name, seen))
         return None, None
+
     try:
         category = DB.Category.GetCategory(doc, builtin)
     except BaseException as exc:
-        logger.debug(to_text(exc))
+        notes.add(u"Category.GetCategory failed for {0}: {1}".format(
+            name, to_text(exc)))
         return None, None
+
     if category is None:
+        notes.add(u"This model has no {0} category, so ViewType {1} "
+                  u"cannot be redirected.".format(name, seen))
         return None, None
-    return category, to_text(getattr(element, "Name", u""))
+
+    return category, u"{0} ({1})".format(
+        to_text(getattr(element, "Name", u"")), seen)
 
 
-def selected_categories(doc, uidoc):
+def selected_categories(doc, uidoc, notes):
     """(categories, category_ids, substitutions) for the selection.
 
     The real `Category.Id` is carried through rather than rebuilt from
@@ -185,7 +216,7 @@ def selected_categories(doc, uidoc):
         # category nothing can switch off. Swap in the annotation
         # category that governs the marker, and record the swap.
         if category_kind(category) == model.OTHER:
-            marker, source = marker_category(doc, element)
+            marker, source = marker_category(doc, element, notes)
             if marker is not None:
                 category = marker
                 substitutions.append((source, to_text(marker.Name)))
@@ -612,7 +643,7 @@ def run():
 
     notes = set()
     (categories, category_ids,
-     substitutions) = selected_categories(doc, uidoc)
+     substitutions) = selected_categories(doc, uidoc, notes)
     swap = model.substitution_note(substitutions)
     if swap:
         notes.add(swap)
@@ -635,7 +666,8 @@ def run():
             "the selection cannot lead to.\n\n"
             "To hide these particular markers, use Hide Across Views "
             "without shift, which hides the selected elements "
-            "themselves.".format(model.category_names(categories)),
+            "themselves.".format(model.category_names(categories))
+            + why_no_marker(notes),
             title=TITLE)
         return
 

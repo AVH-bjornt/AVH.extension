@@ -1457,6 +1457,42 @@ drawings go out.
 A view kind with no entry in the table, a 3D view say, still gets the
 clean refusal from 2.21.2.
 
+### 2.22.0 did nothing, and could not say why
+
+The swap shipped, the file was confirmed on disk at the right commit, and
+shift click on a section produced the **same 2.21.2 dialog**, which is
+what appears when the selection has no reachable category. So the swap
+ran and failed, and `marker_category` had **four** ways to fail, every one
+of them a bare `return None, None`:
+
+- the element has no `ViewType`
+- `ViewType` is not in the table
+- the `BuiltInCategory` is missing from this Revit
+- `Category.GetCategory` raised or returned nothing
+
+Four silent paths behind one dialog. That is how the same message appeared
+twice in this file with two different causes behind it, and it is the
+third time the rule has had to be relearned here:
+
+**A path that gives up must say which path it was.** Not to a log nobody
+reads: to the dialog the person is already looking at.
+
+2.22.1 does not fix the cause, because the cause is not known. It makes
+the next click name it. Each of the four bails now writes a specific line
+into the refusal, including the `ViewType` string it actually saw, which
+also settles whether IronPython renders the enum bare or fully qualified.
+
+One thing was fixed rather than instrumented: the lookup now takes the
+last dotted segment of the ViewType text, so
+`Autodesk.Revit.DB.ViewType.Section` matches as well as `Section`. That is
+one of the four candidates removed rather than diagnosed. The note still
+reports the string it saw either way, so the answer arrives whether or not
+that was it.
+
+**Do not add a fifth silent return here.** Four mutations confirm the
+notes bite: restoring any one of the bare returns fails a check, dropping
+the reasons from the dialog fails four.
+
 ### Known duplication
 
 `selection()` here and `selected_categories()` in Hide in Template do the
