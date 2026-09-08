@@ -1493,6 +1493,46 @@ that was it.
 notes bite: restoring any one of the bare returns fails a check, dropping
 the reasons from the dialog fails four.
 
+### The premise was wrong: a section marker is a Viewer
+
+2.22.1's instrumentation answered in one click: **the selected element
+has no ViewType.**
+
+Selecting a section marker in a plan does not hand back the
+`ViewSection`. It hands back a **`Viewer`**, which sits in the Views
+category and is **not a View at all**, so it has no `ViewType` and never
+did. Three releases were aimed at an object that never arrives:
+
+- 2.21.2 explained the Views category to the user
+- 2.22.0 mapped ViewType to a marker category
+- 2.22.1 instrumented why that mapping never ran
+
+All three were reasoning about a `ViewSection`. Only the fourth asked
+Revit what it had actually been handed, and the answer took one dialog.
+
+**The lesson is not "add diagnostics", it is where they go.** Every one
+of those releases could have been skipped by reporting the element's
+class the first time the swap failed. The cheapest diagnostic in this
+codebase is `element.GetType().Name`, and it was missing from a function
+whose entire job was deciding what kind of element it had.
+
+### Crossing from a Viewer to its view
+
+`VIEWER_VIEW_NAME` on the Viewer carries the name of the view it stands
+for, and that is the route across.
+
+**Matching by name is not something to be pleased about.** It is taken
+here because the parameter holds a name and nothing else, the match is
+against views in this same document rather than against anything a user
+typed, and an ambiguous match **refuses rather than guessing**: two views
+sharing a name produce "2 view(s) carry that name" and no write. A tool
+that picked the first match would eventually switch off Elevations
+because a section happened to share a name.
+
+Every failure along that route names the element's class first, so the
+next report starts from what Revit handed over rather than from what the
+code hoped for.
+
 ### Known duplication
 
 `selection()` here and `selected_categories()` in Hide in Template do the

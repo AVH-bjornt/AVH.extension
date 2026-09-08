@@ -130,10 +130,92 @@ def why_no_marker(notes):
     different causes behind it. Whichever line comes back names the step.
     """
     reasons = [note for note in sorted(notes)
-               if u"ViewType" in note or u"Category" in note]
+               if u"ViewType" in note or u"Category" in note
+               or u"VIEWER_VIEW_NAME" in note or u"stands for" in note]
     if not reasons:
         return ""
     return "\n\n" + "\n".join(reasons)
+
+
+def element_class(element):
+    """The .NET class name, for a note that names what was really got."""
+    try:
+        return to_text(element.GetType().Name)
+    except BaseException:
+        try:
+            return to_text(type(element).__name__)
+        except BaseException:
+            return u"an unknown element"
+
+
+def view_type_of_marker(doc, element, notes):
+    """The ViewType behind a selected marker, or None.
+
+    Selecting a section marker in a plan does **not** hand back the
+    ViewSection. It hands back a `Viewer`, which sits in the Views
+    category and is not a View at all, so it has no `ViewType`. Its
+    VIEWER_VIEW_NAME parameter carries the name of the view it stands
+    for, and that is the route across.
+
+    Matching by name is not something to be pleased about. It is done
+    here because the parameter holds a name and nothing else, the match
+    is against views in this same document rather than against anything a
+    user typed, and an ambiguous match refuses rather than guesses.
+    """
+    view_type = getattr(element, "ViewType", None)
+    if view_type is not None:
+        return view_type
+
+    cls = element_class(element)
+    builtin = getattr(DB.BuiltInParameter, "VIEWER_VIEW_NAME", None)
+    if builtin is None:
+        notes.add(u"{0} has no ViewType, and this Revit has no "
+                  u"VIEWER_VIEW_NAME parameter to follow.".format(cls))
+        return None
+
+    try:
+        parameter = element.get_Parameter(builtin)
+    except BaseException as exc:
+        notes.add(u"{0}: reading VIEWER_VIEW_NAME failed: {1}".format(
+            cls, to_text(exc)))
+        return None
+    if parameter is None:
+        notes.add(u"{0} has no ViewType and carries no VIEWER_VIEW_NAME, "
+                  u"so the view it stands for is unknown.".format(cls))
+        return None
+
+    try:
+        name = to_text(parameter.AsString())
+    except BaseException as exc:
+        notes.add(u"{0}: VIEWER_VIEW_NAME could not be read: {1}".format(
+            cls, to_text(exc)))
+        return None
+    if not name:
+        notes.add(u"{0} has an empty VIEWER_VIEW_NAME.".format(cls))
+        return None
+
+    matches = []
+    try:
+        for view in DB.FilteredElementCollector(doc).OfClass(DB.View):
+            try:
+                if view.IsTemplate:
+                    continue
+                if to_text(view.Name) == name:
+                    matches.append(view)
+            except BaseException:
+                continue
+    except BaseException as exc:
+        notes.add(u"{0}: the views could not be listed: {1}".format(
+            cls, to_text(exc)))
+        return None
+
+    if len(matches) != 1:
+        notes.add(u"{0} stands for a view named {1}, and {2} view(s) "
+                  u"carry that name, so it is ambiguous.".format(
+                      cls, name, len(matches)))
+        return None
+
+    return getattr(matches[0], "ViewType", None)
 
 
 def marker_category(doc, element, notes):
@@ -143,10 +225,8 @@ def marker_category(doc, element, notes):
     BuiltInCategory rather than a category name, because category names
     follow the interface language and this model is not in English.
     """
-    view_type = getattr(element, "ViewType", None)
+    view_type = view_type_of_marker(doc, element, notes)
     if view_type is None:
-        notes.add(u"The selected element has no ViewType, so its marker "
-                  u"category could not be worked out.")
         return None, None
 
     seen = model.view_type_name(view_type)

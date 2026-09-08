@@ -362,7 +362,8 @@ def run_script(doc, uidoc, picked=None, pick_all=False, direction="Hide",
         View=FakeView,
         FilteredElementCollector=FakeCollector,
         BuiltInParameter=Namespace(VIS_GRAPHICS_MODEL=VIS_MODEL,
-                                   VIS_GRAPHICS_ANNOTATION=VIS_ANNOTATION),
+                                   VIS_GRAPHICS_ANNOTATION=VIS_ANNOTATION,
+                                   VIEWER_VIEW_NAME="VIEWER_VIEW_NAME"),
         CategoryType=Namespace(Model="Model", Annotation="Annotation"),
         Category=Namespace(GetCategory=get_category),
         BuiltInCategory=Namespace(OST_Sections="OST_Sections",
@@ -659,6 +660,52 @@ check("the Views category itself is never written to",
       VIEWS not in template.hidden)
 check("the change of scope is stated before the write",
       u"marker categories are used instead" in recorder.confirm_text())
+
+
+class FakeViewer(object):
+    """Category Views, no ViewType, VIEWER_VIEW_NAME naming its view."""
+
+    def __init__(self, category, view_name):
+        self.Category = category
+        self.Name = u"Section 79"
+        self.view_name = view_name
+
+    def GetType(self):
+        return Namespace(Name=u"Viewer")
+
+    def get_Parameter(self, builtin):
+        if builtin != "VIEWER_VIEW_NAME":
+            return None
+        return Namespace(AsString=lambda: self.view_name)
+
+
+class FakeSectionView(object):
+    """A plain view with a ViewType. This button's FakeView is a
+    template, so a section needs its own light stand in."""
+
+    def __init__(self, key, name):
+        self.Id = FakeId(key)
+        self.Name = name
+        self.IsTemplate = False
+        self.ViewType = "Section"
+        self.ViewTemplateId = FakeId(-1)
+
+    def snapshot(self):
+        return None
+
+    def restore(self, state):
+        pass
+
+
+template = controlled_template()
+doc, uidoc = build([FakeCategory(VIEWS, u"Views", "Internal")],
+                   [template])
+doc.views.append(FakeSectionView(500, u"Section 79"))
+doc.elements[1] = FakeViewer(FakeCategory(VIEWS, u"Views", "Internal"),
+                             u"Section 79")
+recorder = run_script(doc, uidoc, pick_all=True)
+check("a Viewer is followed to its view in the template button too",
+      template.hidden.get(SECTIONS) is True, repr(template.hidden))
 
 
 class GuardlessTemplate(FakeView):
