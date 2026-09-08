@@ -69,12 +69,35 @@ class FakeCategory(object):
         self.CategoryType = kind
 
 
+SECTIONS = -2000200
+ELEVATIONS = -2000201
+CALLOUTS = -2000202
+
+MARKER_CATEGORIES = {
+    "OST_Sections": (SECTIONS, u"Sections"),
+    "OST_Elev": (ELEVATIONS, u"Elevations"),
+    "OST_Callouts": (CALLOUTS, u"Callouts"),
+}
+
+
+def get_category(doc, builtin):
+    """Stands in for DB.Category.GetCategory(doc, BuiltInCategory)."""
+    found = MARKER_CATEGORIES.get(builtin)
+    if found is None:
+        return None
+    return FakeCategory(found[0], found[1], "Annotation")
+
+
 class FakeElement(object):
-    def __init__(self, key, category, hideable_in=None):
+    def __init__(self, key, category, hideable_in=None, view_type=None,
+                 name=u""):
         self.Id = FakeId(key)
         self.Category = category
         # None means "every view can hide me"; a set names the view keys.
         self.hideable_in = hideable_in
+        self.Name = name
+        if view_type is not None:
+            self.ViewType = view_type
 
     def CanBeHidden(self, view):
         if self.hideable_in is None:
@@ -287,6 +310,7 @@ class Recorder(object):
     def __init__(self):
         self.alerts = []
         self.printed = []
+        self.confirms = []
         self.picker_items = []
 
     def print_md(self, text):
@@ -294,6 +318,9 @@ class Recorder(object):
 
     def text(self):
         return u"\n".join(self.alerts + self.printed)
+
+    def confirm_text(self):
+        return u"\n".join(self.confirms)
 
 
 def run_script(doc, uidoc, pick=None, pick_all=False, direction="Hide",
@@ -330,6 +357,7 @@ def run_script(doc, uidoc, pick=None, pick_all=False, direction="Hide",
                 raise Exception("options dialog unavailable")
             return direction
         if kwargs.get("yes"):
+            recorder.confirms.append(message)
             return confirm_answer
         recorder.alerts.append(message)
         return None
@@ -344,6 +372,10 @@ def run_script(doc, uidoc, pick=None, pick_all=False, direction="Hide",
         BuiltInParameter=Namespace(VIS_GRAPHICS_MODEL=VIS_MODEL,
                                    VIS_GRAPHICS_ANNOTATION=VIS_ANNOTATION),
         CategoryType=Namespace(Model="Model", Annotation="Annotation"),
+        Category=Namespace(GetCategory=get_category),
+        BuiltInCategory=Namespace(OST_Sections="OST_Sections",
+                                  OST_Elev="OST_Elev",
+                                  OST_Callouts="OST_Callouts"),
         FailureSeverity=Namespace(Warning="Warning"),
         FailureProcessingResult=Namespace(
             ProceedWithRollBack="RollBack", Continue="Continue"),
@@ -605,20 +637,43 @@ check("an unreachable category stops before the picker",
       in recorder.text())
 check("and writes nothing", not free.hidden_categories)
 
-# The real report from Revit: a section selected in a plan hands back the
-# ViewSection, whose category is Views and whose CategoryType is neither
-# Model nor Annotation.
+# A section selected in a plan hands back the ViewSection, whose category
+# is Views and whose CategoryType is neither Model nor Annotation. The
+# marker is governed by the Sections annotation category instead.
 VIEWS = -2000279
-element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"))
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                      view_type="Section", name=u"Section 79")
 free = FakeView(1, u"Level 1")
 doc, uidoc = build([element], [free])
 recorder = run_script(doc, uidoc, pick_all=True, shift=True)
-check("a section marker names the category it actually is",
-      u"Views" in recorder.text())
-check("and is told the plain click does the job, not that it is "
-      "impossible", u"without shift" in recorder.text())
-check("and the Sections confusion is named rather than left to guess",
-      u"Annotation Categories" in recorder.text())
+check("a selected section switches off the Sections category",
+      free.hidden_categories.get(SECTIONS) is True,
+      repr(free.hidden_categories))
+check("the Views category itself is never written to",
+      VIEWS not in free.hidden_categories)
+check("the change of scope is stated before the write, not after",
+      u"marker categories are used instead" in recorder.confirm_text())
+check("and the resolved category is named so a wrong row is visible",
+      u"Sections" in recorder.confirm_text())
+
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                      view_type="Elevation", name=u"East")
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("an elevation resolves to its own category, not Sections",
+      free.hidden_categories.get(ELEVATIONS) is True
+      and SECTIONS not in free.hidden_categories)
+
+element = FakeElement(10, FakeCategory(VIEWS, u"Views", "Internal"),
+                      view_type="ThreeD", name=u"{3D}")
+free = FakeView(1, u"Level 1")
+doc, uidoc = build([element], [free])
+recorder = run_script(doc, uidoc, pick_all=True, shift=True)
+check("a view kind with no marker category still refuses cleanly",
+      u"not a category any view or template can switch off"
+      in recorder.text())
+check("and writes nothing", not free.hidden_categories)
 
 class GuardlessView(FakeView):
     """A view where CanCategoryBeHidden cannot be asked.

@@ -70,9 +70,25 @@ class FakeCategory(object):
         self.CategoryType = kind
 
 
+SECTIONS = -2000200
+VIEWS = -2000279
+
+MARKER_CATEGORIES = {"OST_Sections": (SECTIONS, u"Sections")}
+
+
+def get_category(doc, builtin):
+    found = MARKER_CATEGORIES.get(builtin)
+    if found is None:
+        return None
+    return FakeCategory(found[0], found[1], "Annotation")
+
+
 class FakeElement(object):
-    def __init__(self, category):
+    def __init__(self, category, view_type=None, name=u""):
         self.Category = category
+        self.Name = name
+        if view_type is not None:
+            self.ViewType = view_type
 
 
 class FakeView(object):
@@ -276,6 +292,7 @@ class Recorder(object):
     def __init__(self):
         self.alerts = []
         self.printed = []
+        self.confirms = []
         self.picker_items = []
         self.switch_calls = []
 
@@ -284,6 +301,9 @@ class Recorder(object):
 
     def text(self):
         return u"\n".join(self.alerts + self.printed)
+
+    def confirm_text(self):
+        return u"\n".join(self.confirms)
 
 
 def run_script(doc, uidoc, picked=None, pick_all=False, direction="Hide",
@@ -329,6 +349,7 @@ def run_script(doc, uidoc, picked=None, pick_all=False, direction="Hide",
                 return offer_answer
             if confirm_raises:
                 raise Exception("confirmation unavailable")
+            recorder.confirms.append(message)
             return confirm_answer
         recorder.alerts.append(message)
         return None
@@ -343,6 +364,10 @@ def run_script(doc, uidoc, picked=None, pick_all=False, direction="Hide",
         BuiltInParameter=Namespace(VIS_GRAPHICS_MODEL=VIS_MODEL,
                                    VIS_GRAPHICS_ANNOTATION=VIS_ANNOTATION),
         CategoryType=Namespace(Model="Model", Annotation="Annotation"),
+        Category=Namespace(GetCategory=get_category),
+        BuiltInCategory=Namespace(OST_Sections="OST_Sections",
+                                  OST_Elev="OST_Elev",
+                                  OST_Callouts="OST_Callouts"),
         FailureSeverity=Namespace(Warning="Warning"),
         FailureProcessingResult=Namespace(
             ProceedWithRollBack="RollBack", Continue="Continue"),
@@ -619,6 +644,22 @@ doc, uidoc = build([tags_category()], [template])
 recorder = run_script(doc, uidoc, pick_all=True)
 check("and lands when that parameter is controlled",
       template.hidden.get(TAGS))
+
+# A section selected in a plan resolves to the Sections annotation
+# category, the same swap Hide Across Views makes.
+template = controlled_template()
+doc, uidoc = build([FakeCategory(VIEWS, u"Views", "Internal")], [template])
+doc.elements[1] = FakeElement(FakeCategory(VIEWS, u"Views", "Internal"),
+                              view_type="Section", name=u"Section 79")
+recorder = run_script(doc, uidoc, pick_all=True)
+check("a selected section switches off the Sections category in the "
+      "template", template.hidden.get(SECTIONS) is True,
+      repr(template.hidden))
+check("the Views category itself is never written to",
+      VIEWS not in template.hidden)
+check("the change of scope is stated before the write",
+      u"marker categories are used instead" in recorder.confirm_text())
+
 
 class GuardlessTemplate(FakeView):
     """A template where CanCategoryBeHidden cannot be asked."""

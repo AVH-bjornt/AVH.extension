@@ -1424,13 +1424,38 @@ Revit's own Hide in View, Elements. Both buttons now say that.
 message.** The same failure as the guard above, one layer up: the tool
 knew enough to be useful and reported a wall instead.
 
-Not attempted: mapping a ViewSection to `OST_Sections` so shift click
-could reach the annotation category. The mapping depends on the view
-type, it cannot be verified outside Revit, and guessing it would put the
-wrong category in a dialog that writes to a drawing set. If the whole
-Sections category is what needs switching off, that wants a category
-picker rather than a selection, which is a design change rather than a
-fix.
+### Then Björn said that is exactly what he wants
+
+At 2.22.0 the swap is made: a selected view whose category is Views
+resolves to the annotation category governing its marker.
+
+| ViewType | BuiltInCategory | Confirmed |
+| --- | --- | --- |
+| Section | `OST_Sections` | Yes, by hand against the V/G dialog |
+| Elevation | `OST_Elev` | No, read off the same list |
+| Detail | `OST_Callouts` | No, read off the same list |
+
+Keyed on **ViewType** and valued with **BuiltInCategory names**, both of
+which are English in the API whatever the interface language. Matching a
+displayed category name would break on the first non English
+installation, which is not hypothetical here.
+
+**What made this safe to ship without verifying all three.** The
+resolved category's real name goes into the confirmation dialog before
+anything is written, so a wrong row is visible and cancellable rather
+than discovered afterwards in a drawing set. That turns an unverified
+mapping from a guess into a proposal a human approves. The two unconfirmed
+rows are marked as such in the table above rather than implied to be
+tested.
+
+**The swap is a change of scope and is stated as one.** Selecting one
+section and switching off every section in a drawing set is not what
+"hide this" sounds like, so the dialog says so in as many words before
+the write. Silently widening scope is the kind of thing noticed after the
+drawings go out.
+
+A view kind with no entry in the table, a 3D view say, still gets the
+clean refusal from 2.21.2.
 
 ### Known duplication
 

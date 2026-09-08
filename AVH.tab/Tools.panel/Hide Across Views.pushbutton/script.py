@@ -122,8 +122,34 @@ def category_kind(category):
     return model.OTHER
 
 
+def marker_category(doc, element):
+    """The annotation category governing a view element's marker.
+
+    Returns (Category, source_name) or (None, None). Resolved through
+    BuiltInCategory rather than a category name, because category names
+    follow the interface language and this model is not in English.
+    """
+    view_type = getattr(element, "ViewType", None)
+    if view_type is None:
+        return None, None
+    name = model.marker_category_name(view_type)
+    if not name:
+        return None, None
+    builtin = getattr(DB.BuiltInCategory, name, None)
+    if builtin is None:
+        return None, None
+    try:
+        category = DB.Category.GetCategory(doc, builtin)
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return None, None
+    if category is None:
+        return None, None
+    return category, to_text(getattr(element, "Name", u""))
+
+
 def selection(doc, uidoc):
-    """(elements, categories, category_ids) for the current selection.
+    """(elements, categories, category_ids, substitutions).
 
     The real `Category.Id` is carried through rather than rebuilt from
     its number later. Reconstructing an ElementId from a value is a round
@@ -138,11 +164,12 @@ def selection(doc, uidoc):
         selected = list(uidoc.Selection.GetElementIds())
     except BaseException as exc:
         logger.debug(to_text(exc))
-        return [], [], {}
+        return [], [], {}, []
 
     elements = []
     entries = []
     category_ids = {}
+    substitutions = []
     for element_id in selected:
         try:
             element = doc.GetElement(element_id)
@@ -154,6 +181,17 @@ def selection(doc, uidoc):
         category = getattr(element, "Category", None)
         if category is None:
             continue
+
+        # A section, elevation or callout marker selects the view itself,
+        # whose category is Views and which nothing can switch off. Swap
+        # in the annotation category that actually governs the marker,
+        # and record the swap so the dialog can show it.
+        if category_kind(category) == model.OTHER:
+            marker, source = marker_category(doc, element)
+            if marker is not None:
+                category = marker
+                substitutions.append((source, to_text(marker.Name)))
+
         try:
             entries.append((category.Id, category.Name,
                             category_kind(category)))
@@ -161,7 +199,8 @@ def selection(doc, uidoc):
         except BaseException as exc:
             logger.debug(to_text(exc))
 
-    return elements, model.merge_categories(entries), category_ids
+    return (elements, model.merge_categories(entries), category_ids,
+            substitutions)
 
 
 def template_controls(doc, view, cache):
@@ -529,6 +568,10 @@ def run_categories(doc, views, categories, category_ids, hide, notes):
         "  " + "\n  ".join(model.view_names(plan["ready"])
                            [:model.MAX_LISTED]),
     ]
+    # A redirected selection is a change of scope, so it is said before
+    # the write, not reported after it.
+    for note in sorted(notes):
+        lines = lines + ["", note]
     advice = model.template_advice(plan["template"])
     if advice:
         lines = lines + ["", advice]
@@ -602,7 +645,11 @@ def run():
         return
 
     notes = set()
-    elements, categories, category_ids = selection(doc, uidoc)
+    (elements, categories, category_ids,
+     substitutions) = selection(doc, uidoc)
+    swap = model.substitution_note(substitutions)
+    if swap:
+        notes.add(swap)
     if not elements:
         forms.alert(
             "Select the elements you want hidden, then click again.",

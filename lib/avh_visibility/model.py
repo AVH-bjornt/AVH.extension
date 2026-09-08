@@ -425,3 +425,53 @@ def template_advice(entries):
             u"change nothing. Use Hide in Template for those: {1}".format(
                 len(entries),
                 u", ".join(view_names(entries)[:MAX_LISTED])))
+
+
+# --------------------------------------------------------------------------
+# View markers
+#
+# Selecting a section marker in a plan hands back the ViewSection itself,
+# whose category is Views. Views is neither a model nor an annotation
+# category, so nothing can switch it off. The switch that governs the
+# marker is a separate annotation category, and the selection cannot
+# reach it by itself.
+#
+# Keyed on ViewType, whose enum names are English in the API whatever the
+# interface language, and valued with BuiltInCategory names rather than
+# category names for the same reason: matching a displayed category name
+# breaks on the first non English installation.
+#
+# Confirmed by Björn against Revit on 8 Sep 2026 for Section. The other
+# two are read off the same Annotation Categories list and are NOT
+# confirmed, which is why the resolved category's real name goes in the
+# confirmation dialog before anything is written: a wrong row is visible
+# there and cancellable, rather than discovered afterwards in a drawing
+# set.
+# --------------------------------------------------------------------------
+
+MARKER_CATEGORIES = {
+    u"Section": u"OST_Sections",
+    u"Elevation": u"OST_Elev",
+    u"Detail": u"OST_Callouts",
+}
+
+
+def marker_category_name(view_type):
+    """The BuiltInCategory name governing this view's marker, or None."""
+    return MARKER_CATEGORIES.get(to_text(view_type))
+
+
+def substitution_note(pairs):
+    """What the dialog says about a selection that was redirected.
+
+    Silently turning "I selected this section" into "hide every section"
+    is a jump in scope, and a jump in scope the user cannot see is the
+    kind that gets noticed after the drawings go out.
+    """
+    if not pairs:
+        return u""
+    return (u"The selection contains views, which no view or template can "
+            u"switch off directly. Their marker categories are used "
+            u"instead: {0}. This affects every marker in that category, "
+            u"not only the ones selected.".format(
+                u", ".join(sorted(set(name for _source, name in pairs)))))
