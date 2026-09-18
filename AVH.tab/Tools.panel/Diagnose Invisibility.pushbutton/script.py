@@ -14,13 +14,21 @@ chosen view, and print a per-element report of the reason(s)."""
 # Licence:  GNU General Public License v3. See LICENSE at the root of this
 #           repository, and THIRD_PARTY.md for what else came from where.
 #
-# Modified by AVH on 18 September 2026: this notice was added. Nothing else
-# in this file was changed.
+# Modified by AVH:
+#   18 September 2026, this notice added.
+#   18 September 2026, a local stand in for
+#   applocales.get_locale_string_from_xaml added, because that function is
+#   on pyRevit's develop branch only and the button raised AttributeError
+#   on the release AVH runs. Marked "AVH addition" in the body.
+# Nothing else in this file was changed.
 #
 # It was copied because the tool is merged into pyRevit's develop branch but
 # has not reached a release yet. When it does, delete this folder and use
 # pyRevit's own rather than maintaining a second copy of it.
 # ---------------------------------------------------------------------------
+
+import os                                  # AVH, for the fallback below
+import xml.etree.ElementTree as ET         # AVH, for the fallback below
 
 from pyrevit import revit, forms, script
 from pyrevit import DB
@@ -39,6 +47,56 @@ get_elementid_value = get_elementid_value_func()
 _RESX_BASE = script.get_bundle_file("resources.xaml")
 
 
+# --- AVH addition ----------------------------------------------------------
+# applocales.get_locale_string_from_xaml landed on pyRevit's develop branch
+# alongside this tool and is not in the release AVH runs, so calling it
+# raised AttributeError on the first click and the button never opened.
+#
+# This is that function, reimplemented locally with the same behaviour: try
+# every locale code of the current locale, then en_us, then hand the key
+# back unchanged. _t uses pyRevit's own where it exists and this where it
+# does not, so the button works on both and needs no edit when pyRevit
+# releases the real one.
+# ---------------------------------------------------------------------------
+
+def _read_xaml_key(filepath, key):
+    """One x:Key out of a ResourceDictionary file, or None."""
+    try:
+        root = ET.parse(filepath).getroot()
+        x_ns = "http://schemas.microsoft.com/winfx/2006/xaml"
+        sys_ns = "clr-namespace:System;assembly=mscorlib"
+        for elem in root.iter("{%s}String" % sys_ns):
+            if elem.get("{%s}Key" % x_ns) == key:
+                return elem.text
+    except Exception:
+        pass
+    return None
+
+
+def _locale_string_from_xaml(xaml_base_path, key):
+    """Stand in for applocales.get_locale_string_from_xaml."""
+    base = os.path.splitext(xaml_base_path)[0]
+
+    codes = []
+    try:
+        applocale = applocales.get_current_applocale()
+        if applocale is not None:
+            codes.extend(list(applocale.locale_codes))
+    except Exception:
+        pass
+    if "en_us" not in codes:
+        codes.append("en_us")
+
+    for code in codes:
+        path = "{0}.ResourceDictionary.{1}.xaml".format(base, code)
+        if os.path.isfile(path):
+            result = _read_xaml_key(path, key)
+            if result is not None:
+                return result
+    return key
+
+
+
 def _t(key, default=None):
     """Look up a localized UI string for the current pyRevit / Revit
     language, falling back to en_us and then to `default`.
@@ -50,7 +108,9 @@ def _t(key, default=None):
     Returns:
         str: localized string, `default`, or `key` if no default given
     """
-    result = applocales.get_locale_string_from_xaml(_RESX_BASE, key)
+    lookup = getattr(applocales, "get_locale_string_from_xaml",
+                     _locale_string_from_xaml)
+    result = lookup(_RESX_BASE, key)
     if result == key and default is not None:
         return default
     return result

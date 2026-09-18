@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.23.0.** The authoritative number is `__version__` in
+**Version 2.23.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -192,7 +192,8 @@ to Autodesk Forma from.
 | 2.22.3 | The marker's own parameters are read instead of a parameter name being guessed | Ran, resolved to the wrong view |
 | 2.22.4 | View templates excluded, disagreeing parameters refuse, the resolved view is named | Worked, Sections confirmed |
 | 2.22.5 | A near miss beside a successful resolution goes to the output window, not the dialog | Shipped |
-| 2.23.0 | Diagnose Invisibility copied in from pyRevit; extension licensed GPL v3 | Current |
+| 2.23.0 | Diagnose Invisibility copied in from pyRevit; extension licensed GPL v3 | AttributeError on first click |
+| 2.23.1 | A locale helper that exists only on pyRevit's develop branch is stood in for | Current |
 
 ## Licence
 

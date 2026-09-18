@@ -24,9 +24,19 @@ extensions/pyRevitTools.extension/pyRevit.tab/Analysis.panel/
 Tools.stack/Inspect.pulldown/Diagnose Invisibility.pushbutton/
 ```
 
-The only change to `script.py` is a provenance notice at the top. The
-icon is AVH's, because the original sat inside a pulldown and had none
-of its own.
+Two changes to `script.py`, both marked in the file. A provenance notice
+at the top, and a local stand in for
+`applocales.get_locale_string_from_xaml`, which landed on `develop`
+alongside the tool and is not in the pyRevit release AVH runs. Without it
+the first click raised `AttributeError` and the button never opened. `_t`
+looks the function up rather than calling it, so pyRevit's own is used
+where it exists and no edit is needed when the release catches up.
+
+`test_diagnose_fallback_harness.py` covers that stand in, 15 checks. The
+tool itself is not tested here: it is not AVH's code.
+
+The icon is AVH's, because the original sat inside a pulldown and had
+none of its own.
 
 It was copied because the tool is merged but has not reached a pyRevit
 release. **When it does, delete the folder and use pyRevit's own.**
