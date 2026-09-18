@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.25.1.** The authoritative number is `__version__` in
+**Version 2.26.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -99,6 +99,22 @@ pick which kind of warning to isolate, since most models are mostly
 **Zoom to Selection.** Zooms the active view to whatever is
 selected, as one box with a margin. Stays in the view you are in and
 changes nothing in the model.
+
+**Place at Coordinate.** Type an easting, a northing and an elevation in
+shared survey coordinates and it puts an `AVH_Coordinate_Marker` there,
+hosted on the level below the point, with what you typed written into the
+marker's own parameters. Both decimal separators are accepted. After
+placing, it reads the marker's real shared coordinates back and compares
+them with what you asked for: a disagreement over a millimetre rolls the
+whole thing back rather than leaving a marker in the wrong place.
+
+The marker ships with the extension as `assets/AVH_Coordinate_Marker.rfa`
+and is loaded into the model on first use. It is a Generic Model, not
+hosted and not workplane based, origin at the intersection of the two
+reference planes, with text parameters `AVH_Easting`, `AVH_Northing`,
+`AVH_Elevation` and `AVH_Point_Name`. A parameter the family does not
+have is reported rather than fatal, so a renamed one shows up in the
+output instead of stopping the run.
 
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
@@ -209,7 +225,8 @@ does not.
 | 2.23.1 | A locale helper that exists only on pyRevit's develop branch is stood in for | Worked |
 | 2.24.0 | Imports in Families no longer hidden; imported files found through their elements | Worked |
 | 2.25.0 | Diagnose Invisibility reports a visible element drawing on a hidden category | Worked |
-| 2.25.1 | The copied tool is AVH's to maintain; no re-sync with pyRevit is promised | Current |
+| 2.25.1 | The copied tool is AVH's to maintain; no re-sync with pyRevit is promised | Worked |
+| 2.26.0 | Tools panel: Place at Coordinate | Shipped, needs the marker family |
 
 ## Licence
 
