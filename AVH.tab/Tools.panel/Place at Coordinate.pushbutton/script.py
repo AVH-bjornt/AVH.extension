@@ -240,11 +240,16 @@ def set_text(instance, name, value):
 def move_to(instance, wanted, placed):
     """Shift the instance from where Revit put it to where it belongs.
 
-    Revit does not always honour the Z of the point handed to
-    `NewFamilyInstance` when a level is given: it can snap the instance
-    to the level and keep the difference as an offset, or drop it. The
-    first live run landed exactly 3.000 m out in elevation, which is what
-    that looks like.
+    Revit may not honour the Z of the point handed to
+    `NewFamilyInstance` when a level is given, snapping the instance to
+    the level and keeping the difference as an offset.
+
+    That was blamed for the first live run's 3.000 m error and was the
+    wrong culprit: the real cause was reading the position before the
+    document was regenerated. This is kept anyway, because a snap is a
+    real Revit behaviour and the guard costs nothing once the position
+    being read is true. On a correct placement the delta is zero and
+    nothing happens.
 
     Correcting by moving is not the same as trusting the move. The
     readback still runs afterwards against Revit's own answer, so a
@@ -402,6 +407,17 @@ def run():
         point = DB.XYZ(internal[0], internal[1], internal[2])
         instance = doc.Create.NewFamilyInstance(
             point, symbol, level, DB.Structure.StructuralType.NonStructural)
+
+        # A new element does not report its position until the document
+        # is regenerated. Without this, Location.Point answers (0, 0, 0),
+        # which is not an error and not a null: it is a plausible point,
+        # and every check downstream believed it. The first two live runs
+        # both failed on that, once by refusing a correct placement and
+        # once by "correcting" it to exactly twice the right vector.
+        try:
+            doc.Regenerate()
+        except BaseException as exc:
+            logger.debug(to_text(exc))
 
         for key, parameter_name, _prompt in FIELDS:
             note = set_text(instance, parameter_name, to_text(values[key]))

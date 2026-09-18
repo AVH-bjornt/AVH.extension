@@ -133,16 +133,35 @@ class FakeSymbol(object):
         self.IsActive = True
 
 
+ORIGIN_POINT = None  # set below, once FakeXYZ exists
+
+
 class FakeLocation(object):
-    def __init__(self, point):
-        self.Point = point
+    """A new element reports (0, 0, 0) until the document regenerates.
+
+    This is Revit's real behaviour and the fake did not have it, which is
+    why 67 checks passed over a tool that could not place a marker. A
+    fake that answers correctly straight away tests a Revit that does not
+    exist.
+    """
+
+    def __init__(self, point, instance):
+        self._point = point
+        self._instance = instance
+
+    @property
+    def Point(self):
+        if not self._instance.regenerated:
+            return FakeXYZ(0.0, 0.0, 0.0)
+        return self._point
 
 
 class FakeInstance(object):
     def __init__(self, point, symbol, level, missing_params=(), doc=None):
         self.Document = doc
         self.Id = id(self)
-        self.Location = FakeLocation(point)
+        self.regenerated = False
+        self.Location = FakeLocation(point, self)
         self.symbol = symbol
         self.level = level
         self.parameters = {}
@@ -197,7 +216,8 @@ class FakeTransformUtils(object):
             if instance.Id == element_id:
                 point = instance.Location.Point
                 instance.Location = FakeLocation(FakeXYZ(
-                    point.X + delta.X, point.Y + delta.Y, point.Z + delta.Z))
+                    point.X + delta.X, point.Y + delta.Y, point.Z + delta.Z),
+                    instance)
                 doc.moves.append((delta.X, delta.Y, delta.Z))
                 return
         raise Exception("no such element")
@@ -223,8 +243,14 @@ class FakeDocument(object):
         self.no_location = no_location
         self.commit_status = commit_status
         self.move_raises = move_raises
+        self.regenerations = 0
         self.moves = []
         FakeTransformUtils.doc = self
+
+    def Regenerate(self):
+        self.regenerations += 1
+        for instance in self.instances:
+            instance.regenerated = True
 
     def LoadFamily(self, path):
         self.load_calls.append(path)
@@ -362,7 +388,7 @@ def placed_shared(doc):
     """Where the instance really ended up, in metres."""
     if not doc.instances:
         return None
-    point = doc.instances[-1].Location.Point
+    point = doc.instances[-1].Location._point
     position = FakeProjectLocation().GetProjectPosition(point)
     return tuple(model.feet_to_metres(value) for value in
                  (position.EastWest, position.NorthSouth, position.Elevation))
@@ -490,6 +516,10 @@ check("place: committed, not rolled back",
       FakeTransaction.log == ["start", "commit"], str(FakeTransaction.log))
 check("place: nothing said about being below every level",
       u"below every level" not in recorder.text())
+check("place: the document was regenerated before the position was read",
+      doc.regenerations >= 1, str(doc.regenerations))
+check("place: and nothing was moved, the placement was already right",
+      not doc.moves, str(doc.moves))
 
 # A period decimal has to work as well, since surveys arrive both ways.
 doc = FakeDocument(symbols=[marker()], levels=levels())
