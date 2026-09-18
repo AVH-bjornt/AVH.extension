@@ -234,6 +234,26 @@ class FakeView3D(object):
         self.hidden = set(hidden)
 
 
+class FakeImportInstance(object):
+    """An imported or linked CAD file placed in the project.
+
+    Family geometry built from an import has no element like this, which
+    is exactly why the tool counts these rather than reading the category
+    tree.
+    """
+
+    def __init__(self, category, raises=False):
+        self.Id = FakeId(next_id())
+        self._category = category
+        self.raises = raises
+
+    @property
+    def Category(self):
+        if self.raises:
+            raise Exception("this instance has no readable category")
+        return self._category
+
+
 class FakeSettings(object):
     def __init__(self, categories):
         self.Categories = categories
@@ -253,20 +273,25 @@ class FakeDocument(object):
             for built_in, name, category_type in CATEGORY_NAMES
             if built_in not in missing_categories
         ]
-        # Each imported DWG is a subcategory of the import parent, which
-        # is how Revit models them: there is no CategoryType for imports.
-        parent = self.category("OST_ImportObjectStyles")
+        # Each imported file is its OWN top level category, and Revit
+        # puts an ImportInstance in the model pointing at it. It is not a
+        # subcategory of Imports in Families, which is what this fake
+        # claimed until 2.24.0 and is why 84 checks passed over a live
+        # bug. The fake agreed with the code because both came out of the
+        # same wrong idea.
+        #
+        # Imports in Families stays a plain category with no children.
+        # Geometry imported inside a family draws on it and has no
+        # ImportInstance of its own, which is the distinction the tool
+        # now depends on.
+        self.import_instances = []
         for import_name in imports:
-            child = FakeCategory("OST_ImportObjectStyles", import_name,
-                                 "Model")
-            self.categories.append(child)
-            if parent is not None:
-                parent.SubCategories.append(child)
-        self.Settings = FakeSettings([
-            category for category in self.categories
-            if category.BuiltInName != "OST_ImportObjectStyles"
-            or category is parent])
-        self.elements = list(views) + list(view_types)
+            category = FakeCategory("OST_ImportedFile", import_name, "Model")
+            self.categories.append(category)
+            self.import_instances.append(FakeImportInstance(category))
+        self.Settings = FakeSettings(list(self.categories))
+        self.elements = (list(views) + list(view_types)
+                         + list(self.import_instances))
         self.in_transaction = False
 
     def category(self, built_in_name):
@@ -371,6 +396,7 @@ def build_db(doc, name_setter_raises=False):
                                     RolledBack="RolledBack"),
         ElementId=Namespace(InvalidElementId=INVALID_ID),
         FilteredElementCollector=FakeCollector,
+        ImportInstance=FakeImportInstance,
         View3D=View3D,
         ViewFamilyType=FakeViewFamilyType,
         ViewFamily=Namespace(ThreeDimensional="ThreeDimensional",
@@ -497,8 +523,12 @@ check("create: annotation categories off",
       view is not None and view.AreAnnotationCategoriesHidden)
 check("create: analytical categories off",
       view is not None and view.AreAnalyticalModelCategoriesHidden)
-check("create: imported categories off",
-      view is not None and view.AreImportCategoriesHidden)
+check("create: Imports in Families is NOT hidden",
+      view is not None and
+      u"OST_ImportObjectStyles" not in hidden_names(doc, view),
+      u", ".join(sorted(hidden_names(doc, view))) if view else u"no view")
+check("create: and the blunt property was never used",
+      view is not None and not view.AreImportCategoriesHidden)
 check("create: linked models off",
       view is not None and u"OST_RvtLinks" in hidden_names(doc, view))
 check("create: coordination models off",
@@ -758,65 +788,109 @@ def import_raising_init(self, *args, **kwargs):
     self.group_modes = {"imports": "raise"}
 
 
-FakeView3D.__init__ = import_raising_init
-try:
-    recorder = run_script(doc)
-finally:
-    FakeView3D.__init__ = saved
+# The model also holds a family built from an imported DWG, the toilet
+# that started all this. It has no ImportInstance of its own, so it is
+# represented by one pointing at Imports in Families, and it must come
+# through untouched while the site DWGs go off.
+doc.elements.append(
+    FakeImportInstance(doc.category("OST_ImportObjectStyles")))
+
+recorder = run_script(doc)
 
 view = doc.views()[0] if doc.views() else None
 labels = hidden_labels(doc, view) if view else set()
-check("no import property: each imported DWG hidden",
-      set([u"ELG_lóð.dwg", u"Survey.dwg"]) <= labels,
+check("imports: each imported file hidden",
+      set([u"ELG_l\u00f3\u00f0.dwg", u"Survey.dwg"]) <= labels,
       u", ".join(sorted(labels)))
-check("no import property: the parent category hidden too",
-      u"Imports in Families" in labels)
-check("no import property: annotation still went through its property",
-      view is not None and view.AreAnnotationCategoriesHidden)
-check("no import property: model categories not swept up",
+check("imports: Imports in Families left visible",
+      u"Imports in Families" not in labels,
+      u", ".join(sorted(labels)))
+check("imports: the report says so out loud",
+      u"Imports in Families left on" in recorder.text(), recorder.text())
+check("imports: family geometry survives alongside the site DWGs",
+      view is not None and
+      u"OST_ImportObjectStyles" not in hidden_names(doc, view),
+      u", ".join(sorted(hidden_names(doc, view))) if view else u"no view")
+check("imports: the blunt property was not used here either",
+      view is not None and not view.AreImportCategoriesHidden)
+check("imports: two files hidden, not three",
+      u"2 hidden, Imports in Families left on" in recorder.text(),
+      recorder.text())
+check("imports: model categories not swept up",
       u"OST_Walls" not in hidden_names(doc, view))
-check("no import property: still committed",
-      len(FakeTransaction.committed) == 1)
-check("no import property: no warning, the fallback did the job",
+check("imports: still committed", len(FakeTransaction.committed) == 1)
+check("imports: no warning",
       not any(u"could not be applied" in alert for alert in recorder.alerts),
       u" | ".join(recorder.alerts))
 
+# The same file imported many times is one write, not forty. A workshared
+# model marked as modified for nothing is a sync somebody has to do.
+shared = FakeCategory("OST_ImportedFile", u"Survey.dwg", "Model")
+doc = FakeDocument(path_name=u"C:\\Verk\\ELG_CC01_K.rvt",
+                   view_types=[FakeViewFamilyType()])
+doc.categories.append(shared)
+doc.Settings.Categories.append(shared)
+doc.elements.extend([FakeImportInstance(shared) for _ in range(4)])
+recorder = run_script(doc)
+view = doc.views()[0] if doc.views() else None
+check("imports: four instances of one file report one hide",
+      u"1 hidden, Imports in Families left on" in recorder.text(),
+      recorder.text())
+
+# An ImportInstance that claims Imports in Families must not get it
+# hidden. Nothing should produce one, which is the point: the guard has
+# to hold when the input is wrong, not only when it is tidy.
+doc = FakeDocument(path_name=u"C:\\Verk\\ELG_CC01_K.rvt",
+                   view_types=[FakeViewFamilyType()])
+doc.elements.append(
+    FakeImportInstance(doc.category("OST_ImportObjectStyles")))
+recorder = run_script(doc)
+view = doc.views()[0] if doc.views() else None
+check("imports: an instance claiming Imports in Families is refused",
+      u"OST_ImportObjectStyles" not in hidden_names(doc, view),
+      u", ".join(sorted(hidden_names(doc, view))) if view else u"no view")
+
+# An instance whose category cannot be read is skipped, not fatal.
+doc = FakeDocument(path_name=u"C:\\Verk\\ELG_CC01_K.rvt",
+                   view_types=[FakeViewFamilyType()], imports=(u"Survey.dwg",))
+doc.elements.append(FakeImportInstance(None, raises=True))
+recorder = run_script(doc)
+view = doc.views()[0] if doc.views() else None
+check("imports: an unreadable instance does not stop the others",
+      u"Survey.dwg" in hidden_labels(doc, view),
+      u", ".join(sorted(hidden_labels(doc, view))) if view else u"no view")
+
 # A model with no imports at all is the ordinary case, not a failure.
 doc = FakeDocument(path_name=u"C:\\Verk\\ELG_CC01_K.rvt",
-                   view_types=[FakeViewFamilyType()],
-                   missing_categories=("OST_ImportObjectStyles",))
-FakeView3D.__init__ = import_raising_init
-try:
-    recorder = run_script(doc)
-finally:
-    FakeView3D.__init__ = saved
-
+                   view_types=[FakeViewFamilyType()])
+recorder = run_script(doc)
 check("no imports in the model: not reported as a failure",
       not any(u"could not be applied" in alert for alert in recorder.alerts),
       u" | ".join(recorder.alerts))
 check("no imports in the model: said so rather than claiming a hide",
-      u"there being none in this model" in recorder.text())
+      u"none in this model" in recorder.text(), recorder.text())
 check("no imports in the model: still committed",
       len(FakeTransaction.committed) == 1)
 
-# A Revit with no import category at all is a different thing, and with
-# the property already unusable there is then nothing left to hide them
-# with, so it has to be said out loud.
+# Without Imports in Families there is no way to tell a file's category
+# from family geometry, so the tool refuses rather than guessing. That
+# refusal IS the fix: guessing is what 2.12.1 did.
 doc = FakeDocument(path_name=u"C:\\Verk\\ELG_CC01_K.rvt",
                    view_types=[FakeViewFamilyType()],
+                   imports=(u"Survey.dwg",),
                    missing_from_enum=("OST_ImportObjectStyles",),
                    missing_categories=("OST_ImportObjectStyles",))
-FakeView3D.__init__ = import_raising_init
-try:
-    recorder = run_script(doc)
-finally:
-    FakeView3D.__init__ = saved
-
-check("no import category in this Revit: warned about",
+recorder = run_script(doc)
+view = doc.views()[0] if doc.views() else None
+check("unidentifiable Imports in Families: warned about",
       any(u"could not be applied" in alert for alert in recorder.alerts),
       u" | ".join(recorder.alerts))
-check("no import category in this Revit: named in the report",
-      u"OST_ImportObjectStyles not in this Revit version" in recorder.text())
+check("unidentifiable Imports in Families: nothing was hidden for imports",
+      u"Survey.dwg" not in hidden_labels(doc, view),
+      u", ".join(sorted(hidden_labels(doc, view))) if view else u"no view")
+check("unidentifiable Imports in Families: the report explains why",
+      u"rather than risk hiding family geometry again" in recorder.text(),
+      recorder.text())
 
 
 # --------------------------------------------------------------------------

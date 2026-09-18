@@ -211,53 +211,89 @@ def hide_categories_of_type(doc, view, category_type_name):
     return hidden, failures
 
 
-def hide_subcategories_of(doc, view, parent_category_name):
-    """Fallback for a family that has a parent category, not a type.
+def imported_file_categories(doc):
+    """The category of every imported or linked CAD instance in the model.
 
-    Imports are the case: every imported DWG, DXF or SAT is a
-    subcategory of `OST_ImportObjectStyles`, one per file, so there is no
-    CategoryType that gathers them. The parent is hidden first, and each
-    subcategory after it, because whether hiding the parent is enough is
-    not something to assume.
-
-    Returns (hidden_count, failures), matching `hide_categories_of_type`.
+    Read from the elements, not from the category tree, because the tree
+    is what 2.12.1 got wrong. An `ImportInstance` exists for a file
+    somebody imported or linked into the project. Geometry imported
+    inside a *family* has no ImportInstance here: it draws on Imports in
+    Families. That difference is exactly the one this tool needs, and
+    asking the elements is the only way to get it right.
     """
-    built_in = getattr(DB.BuiltInCategory, parent_category_name, None)
-    if built_in is None:
-        return 0, [u"{0} not in this Revit version".format(
-            parent_category_name)]
-
+    found = []
     try:
-        parent = DB.Category.GetCategory(doc, built_in)
-    except BaseException:
-        parent = None
-    if parent is None:
-        return 0, []
+        collector = DB.FilteredElementCollector(doc)
+        collector = collector.OfClass(DB.ImportInstance)
+        for instance in collector:
+            try:
+                category = instance.Category
+            except BaseException:
+                category = None
+            if category is not None:
+                found.append(category.Id)
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+    return found
+
+
+def protected_category_id(doc):
+    """The Imports in Families category id, or None if it cannot be read."""
+    built_in = getattr(DB.BuiltInCategory, model.IMPORTS_IN_FAMILIES, None)
+    if built_in is None:
+        return None
+    try:
+        category = DB.Category.GetCategory(doc, built_in)
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return None
+    if category is None:
+        return None
+    try:
+        return category.Id
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return None
+
+
+def hide_imported_files(doc, view):
+    """Switch off each imported file, and never Imports in Families.
+
+    Returns (ok, note), matching the other hide helpers.
+    """
+    protected = protected_category_id(doc)
+    if protected is None:
+        # Leaving imports on beats hiding the wrong thing. Without the
+        # protected id there is no way to be sure an id belongs to a file
+        # rather than to family geometry, and getting that wrong silently
+        # is the failure this function was written to end.
+        return False, (u"Imports in Families could not be identified, so "
+                       u"imported files were left visible rather than "
+                       u"risk hiding family geometry again")
+
+    targets = model.import_categories_to_hide(
+        imported_file_categories(doc), protected)
+    if not targets:
+        return True, u"none in this model"
 
     hidden = 0
     failures = []
-    targets = [parent]
-    try:
-        for subcategory in parent.SubCategories:
-            targets.append(subcategory)
-    except BaseException as exc:
-        failures.append(u"subcategories unreadable ({0})".format(to_text(exc)))
-
-    for category in targets:
+    for category_id in targets:
         try:
-            if not view.CanCategoryBeHidden(category.Id):
+            if not view.CanCategoryBeHidden(category_id):
                 continue
-            view.SetCategoryHidden(category.Id, True)
+            view.SetCategoryHidden(category_id, True)
             hidden += 1
         except BaseException as exc:
-            failures.append(u"{0} ({1})".format(
-                to_text(category.Name), to_text(exc)))
+            failures.append(to_text(exc))
 
-    return hidden, failures
+    if failures:
+        return False, u"hid {0}, failed on {1}".format(
+            hidden, u"; ".join(failures))
+    return True, u"{0} hidden, Imports in Families left on".format(hidden)
 
 
-def hide_category_group(doc, view, property_name, category_type_name,
-                        parent_category_name):
+def hide_category_group(doc, view, property_name, category_type_name):
     """Switch off a whole family of categories. Returns (ok, note).
 
     The property is tried first, because it is one call and it is exactly
@@ -278,12 +314,8 @@ def hide_category_group(doc, view, property_name, category_type_name,
     if property_worked:
         return True, u"via {0}".format(property_name)
 
-    if category_type_name:
-        hidden, failures = hide_categories_of_type(
-            doc, view, category_type_name)
-    else:
-        hidden, failures = hide_subcategories_of(
-            doc, view, parent_category_name)
+    hidden, failures = hide_categories_of_type(
+        doc, view, category_type_name)
 
     note = u"{0} unusable ({1}), hid {2} categories one at a time".format(
         property_name, property_error, hidden)
@@ -370,13 +402,19 @@ def run():
             view.ViewTemplateId = invalid_id()
 
         for group in model.HIDDEN_CATEGORY_GROUPS:
-            property_name, type_name, parent_name, label = group
+            property_name, type_name, label = group
             ok, note = hide_category_group(
-                doc, view, property_name, type_name, parent_name)
+                doc, view, property_name, type_name)
             if ok:
                 notes.append(u"{0}: off ({1})".format(label, note))
             else:
                 problems.append(u"{0}: {1}".format(label, note))
+
+        ok, note = hide_imported_files(doc, view)
+        if ok:
+            notes.append(u"imported files: off ({0})".format(note))
+        else:
+            problems.append(u"imported files: {0}".format(note))
 
         for category_name, label in model.HIDDEN_CATEGORIES:
             ok, note = hide_named_category(doc, view, category_name)

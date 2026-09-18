@@ -25,25 +25,59 @@ HIDDEN_CATEGORIES = (
     (u"OST_Lines", u"lines"),
 )
 
-# The parent of every imported DWG, DXF and SAT category. Imports appear
-# as its subcategories, one per imported file, so there is no CategoryType
-# that gathers them the way Annotation gathers annotation categories.
-IMPORT_PARENT_CATEGORY = u"OST_ImportObjectStyles"
+# The "Imports in Families" row on the Imported Categories tab, and the
+# reason 2.24.0 exists.
+#
+# 2.12.1 assumed every imported file was a subcategory of this one, and
+# switched the whole branch off. Revit does not work that way. Each
+# imported file is its own category, and this one carries geometry that
+# was imported *into a family*: sanitary ware, ironmongery and most
+# manufacturer content is built that way. Hiding it takes that content
+# out of the view and out of the Forma export, with nothing on screen to
+# say anything went missing. It cost Bjoern an afternoon on 18 Sep 2026.
+#
+# It is never hidden. Imported files are found through the elements that
+# use them instead, which cannot make the same mistake.
+IMPORTS_IN_FAMILIES = u"OST_ImportObjectStyles"
 
 # Whole families of categories, switched off through the same properties
 # the Visibility/Graphics dialog uses for its checkboxes. Each entry is
-# (property, CategoryType for the fallback, parent category for the
-# fallback, label). Exactly one of the two fallback fields is set: the
-# imported categories have a parent and no CategoryType, the other two
-# have a CategoryType and no parent.
+# (property, CategoryType for the per category fallback, label).
+#
+# Imports are deliberately not here. There is no property that hides
+# imported files without also hiding Imports in Families, which is the
+# whole of the 2.12.1 bug, so they have their own route.
 HIDDEN_CATEGORY_GROUPS = (
-    (u"AreAnnotationCategoriesHidden", u"Annotation", u"",
+    (u"AreAnnotationCategoriesHidden", u"Annotation",
      u"annotation categories"),
-    (u"AreAnalyticalModelCategoriesHidden", u"AnalyticalModel", u"",
+    (u"AreAnalyticalModelCategoriesHidden", u"AnalyticalModel",
      u"analytical categories"),
-    (u"AreImportCategoriesHidden", u"", IMPORT_PARENT_CATEGORY,
-     u"imported categories"),
 )
+
+
+def import_categories_to_hide(category_ids, protected_id):
+    """Which category ids to switch off for imported files.
+
+    `category_ids` is the category of every imported or linked CAD
+    instance in the model, duplicates and all. `protected_id` is the
+    Imports in Families category, which is never returned even if an
+    element claims it.
+
+    Order is preserved so two runs report the same way, and duplicates
+    are dropped so a model with forty imports of one file is one write.
+    """
+    keep = []
+    seen = set()
+    for category_id in category_ids:
+        if category_id is None:
+            continue
+        if protected_id is not None and category_id == protected_id:
+            continue
+        if category_id in seen:
+            continue
+        seen.add(category_id)
+        keep.append(category_id)
+    return keep
 
 
 def sanitize_view_name(name):

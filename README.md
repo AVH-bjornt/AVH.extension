@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.23.1.** The authoritative number is `__version__` in
+**Version 2.24.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -130,9 +130,17 @@ both sides, and the problem doors in red. Rerun to refresh it.
 ### Forma
 
 **Make Forma View.** Creates or refreshes a 3D view named after the
-model file, with annotation, analytical and imported categories, linked
-models, coordination models and lines switched off. The view to export
-to Autodesk Forma from.
+model file, with annotation and analytical categories, imported DWGs and
+SATs, linked models, coordination models and lines switched off. The
+view to export to Autodesk Forma from.
+
+**Imports in Families is deliberately left on.** Sanitary ware,
+ironmongery and most manufacturer content is built from geometry
+imported into a family, and it draws on that category. Switching it off
+takes those families out of the view and out of the Forma export with
+nothing on screen to say so. Imported files are found through the
+elements that place them instead, so a site DWG goes off and a toilet
+does not.
 
 ## Version history
 
@@ -193,7 +201,8 @@ to Autodesk Forma from.
 | 2.22.4 | View templates excluded, disagreeing parameters refuse, the resolved view is named | Worked, Sections confirmed |
 | 2.22.5 | A near miss beside a successful resolution goes to the output window, not the dialog | Shipped |
 | 2.23.0 | Diagnose Invisibility copied in from pyRevit; extension licensed GPL v3 | AttributeError on first click |
-| 2.23.1 | A locale helper that exists only on pyRevit's develop branch is stood in for | Current |
+| 2.23.1 | A locale helper that exists only on pyRevit's develop branch is stood in for | Worked |
+| 2.24.0 | Imports in Families no longer hidden; imported files found through their elements | Current |
 
 ## Licence
 
