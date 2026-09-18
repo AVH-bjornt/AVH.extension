@@ -87,9 +87,20 @@ PARAM_NORTHING = u"AVH_Northing"
 PARAM_ELEVATION = u"AVH_Elevation"
 PARAM_NAME = u"AVH_Point_Name"
 
+# What the user is asked, in the order Revit's own Properties palette
+# lists it: N/S above E/W. Reading a coordinate out of Revit and typing it
+# into a dialog that asks the other way round is how two numbers get
+# transposed by hand, and a transposed coordinate lands somewhere
+# plausible and wrong.
+#
+# **This is presentation order only.** Every tuple below is (easting,
+# northing, elevation), because index 0 is tied to
+# ProjectPosition.EastWest and reordering it would silently swap the
+# axes. The two orders differ on purpose and the difference is load
+# bearing.
 FIELDS = (
-    (u"easting", PARAM_EASTING, u"Easting (E), in metres"),
-    (u"northing", PARAM_NORTHING, u"Northing (N), in metres"),
+    (u"northing", PARAM_NORTHING, u"Northing (N/S), in metres"),
+    (u"easting", PARAM_EASTING, u"Easting (E/W), in metres"),
     (u"elevation", PARAM_ELEVATION, u"Elevation (Z), in metres"),
 )
 
@@ -298,11 +309,12 @@ def diagnose(frame, shared_feet, internal, placed, actual_shared_feet):
 
 def report(typed, actual, level_name, offset_feet, below_all, notes):
     output.print_md(u"### {0}".format(TITLE))
-    output.print_md(u"| | Easting | Northing | Elevation |")
+    # Shown N, E, Z to match Revit. `typed` and `actual` are E, N, Z.
+    output.print_md(u"| | Northing | Easting | Elevation |")
     output.print_md(u"| --- | ---: | ---: | ---: |")
-    output.print_md(u"| Asked for | {0} | {1} | {2} |".format(
+    output.print_md(u"| Asked for | {1} | {0} | {2} |".format(
         *[model.format_metres(value) for value in typed]))
-    output.print_md(u"| Placed at | {0} | {1} | {2} |".format(
+    output.print_md(u"| Placed at | {1} | {0} | {2} |".format(
         *[model.format_metres(value) for value in actual]))
 
     output.print_md(u"Hosted on **{0}**, offset {1} m.".format(
@@ -360,14 +372,26 @@ def run():
         return
     level, offset_feet, below_all = chosen
 
+    # The project's own origin goes in the dialog too. A survey point set
+    # up with its easting and northing transposed makes this tool
+    # faithfully wrong, and no amount of care inside the tool can see
+    # that. Showing what Revit believes north and east are lets the
+    # person who does know spot it before anything is placed.
+    origin = tuple(model.feet_to_metres(value) for value in frame.origin)
     if not forms.alert(
-            u"Place {0} at\n\nE {1}\nN {2}\nZ {3}\n\non level {4}?\n\n"
-            u"Check those numbers read the way you meant them.".format(
+            u"Place {0} at\n\nN {1}\nE {2}\nZ {3}\n\non level {4}?\n\n"
+            u"Check those numbers read the way you meant them.\n\n"
+            u"This model's internal origin sits at N {5}, E {6}. If those "
+            u"two look the wrong way round, the survey point is "
+            u"transposed and the marker will land in the wrong "
+            u"place.".format(
                 FAMILY_NAME,
-                model.format_metres(typed[0]),
                 model.format_metres(typed[1]),
+                model.format_metres(typed[0]),
                 model.format_metres(typed[2]),
-                to_text(level.Name)),
+                to_text(level.Name),
+                model.format_metres(origin[1]),
+                model.format_metres(origin[0])),
             title=TITLE, yes=True, no=True):
         return
 

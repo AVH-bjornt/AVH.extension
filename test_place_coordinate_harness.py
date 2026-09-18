@@ -413,9 +413,16 @@ def shared_for_internal(x_m, y_m, z_m):
 
 
 def typed_for(target, comma=True):
-    """The three strings a user would type for that point."""
+    """The three strings a user would type, in the order they are asked.
+
+    `target` is (easting, northing, elevation), the order everything
+    inside the tool uses. The dialog asks northing first, to match
+    Revit's own Properties palette, so this reorders. The two orders
+    differing is deliberate and is exactly the kind of thing that
+    transposes a coordinate, so it is pinned by checks below.
+    """
     out = []
-    for value in target:
+    for value in (target[1], target[0], target[2]):
         text = u"{0:.3f}".format(value)
         out.append(text.replace(u".", u",") if comma else text)
     return out
@@ -505,8 +512,13 @@ check("place: the report names that level",
 check("place: the offset is reported in metres, not feet",
       u"2.000" in recorder.text(), recorder.text())
 check("place: the typed values were written to parameters",
-      doc.instances and
-      doc.instances[0].parameters["AVH_Easting"].value == ANSWERS[0])
+      bool(doc.instances) and
+      doc.instances[0].parameters["AVH_Northing"].value == ANSWERS[0] and
+      doc.instances[0].parameters["AVH_Easting"].value == ANSWERS[1],
+      u"N={0!r} E={1!r}".format(
+          doc.instances[0].parameters["AVH_Northing"].value,
+          doc.instances[0].parameters["AVH_Easting"].value)
+      if doc.instances else u"nothing placed")
 check("place: and the point name",
       bool(doc.instances) and
       doc.instances[0].parameters["AVH_Point_Name"].value == u"SP-014")
@@ -520,6 +532,23 @@ check("place: the document was regenerated before the position was read",
       doc.regenerations >= 1, str(doc.regenerations))
 check("place: and nothing was moved, the placement was already right",
       not doc.moves, str(doc.moves))
+check("place: asked northing, easting, elevation, in that order",
+      [p.split(u" ")[0] for p in recorder.prompts[:3]]
+      == [u"Northing", u"Easting", u"Elevation"],
+      u" | ".join(recorder.prompts))
+check("place: the report shows northing first too",
+      recorder.text().find(u"| Northing |") >= 0 and
+      recorder.text().find(u"| Northing |")
+      < recorder.text().find(u"Easting | Elevation"),
+      recorder.text())
+check("place: the confirmation names the model's own origin",
+      u"internal origin sits at" in recorder.text(), recorder.text())
+check("place: with the real numbers, northing first",
+      u"N {0}, E {1}".format(
+          model.format_metres(model.feet_to_metres(ORIGIN_N)),
+          model.format_metres(model.feet_to_metres(ORIGIN_E)))
+      in recorder.text(),
+      recorder.text())
 
 # A period decimal has to work as well, since surveys arrive both ways.
 doc = FakeDocument(symbols=[marker()], levels=levels())
@@ -552,9 +581,12 @@ check("confirmation declined: no transaction",
 
 doc = FakeDocument(symbols=[marker()], levels=levels())
 recorder = run_script(doc, answers=[u"nonsense", ANSWERS[1], ANSWERS[2], u""])
+check("unparseable: the first prompt is the northing",
+      recorder.prompts and u"Northing" in recorder.prompts[0],
+      u" | ".join(recorder.prompts))
 check("unparseable: nothing placed", not doc.instances)
 check("unparseable: the field is named",
-      u"Easting" in recorder.text(), recorder.text())
+      u"Northing" in recorder.text(), recorder.text())
 check("unparseable: no transaction was opened",
       not FakeTransaction.log, str(FakeTransaction.log))
 

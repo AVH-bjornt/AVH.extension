@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.26.2.** The authoritative number is `__version__` in
+**Version 2.27.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -100,7 +100,7 @@ pick which kind of warning to isolate, since most models are mostly
 selected, as one box with a margin. Stays in the view you are in and
 changes nothing in the model.
 
-**Place at Coordinate.** Type an easting, a northing and an elevation in
+**Place at Coordinate.** Type a northing, an easting and an elevation in
 shared survey coordinates and it puts an `AVH_Coordinate_Marker` there,
 hosted on the level below the point, with what you typed written into the
 marker's own parameters. Both decimal separators are accepted. After
@@ -228,7 +228,8 @@ does not.
 | 2.25.1 | The copied tool is AVH's to maintain; no re-sync with pyRevit is promised | Worked |
 | 2.26.0 | Tools panel: Place at Coordinate | Landed 3 m out in Z and 58 km out in plan |
 | 2.26.1 | A snapped placement is moved back, and a mismatch prints the numbers | Doubled the position instead |
-| 2.26.2 | The document is regenerated before a new element's position is read | Current |
+| 2.26.2 | The document is regenerated before a new element's position is read | Worked |
+| 2.27.0 | Asked and reported northing first, to match Revit; the model's own origin is shown | Current |
 
 ## Licence
 
