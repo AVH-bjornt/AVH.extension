@@ -237,6 +237,60 @@ def set_text(instance, name, value):
     return u""
 
 
+def move_to(instance, wanted, placed):
+    """Shift the instance from where Revit put it to where it belongs.
+
+    Revit does not always honour the Z of the point handed to
+    `NewFamilyInstance` when a level is given: it can snap the instance
+    to the level and keep the difference as an offset, or drop it. The
+    first live run landed exactly 3.000 m out in elevation, which is what
+    that looks like.
+
+    Correcting by moving is not the same as trusting the move. The
+    readback still runs afterwards against Revit's own answer, so a
+    conversion that is actually wrong still fails.
+
+    Returns a note, empty when nothing needed doing.
+    """
+    delta = (wanted[0] - placed.X, wanted[1] - placed.Y, wanted[2] - placed.Z)
+    if all(abs(value) < 1e-9 for value in delta):
+        return u""
+    try:
+        DB.ElementTransformUtils.MoveElement(
+            instance.Document, instance.Id, DB.XYZ(*delta))
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return u"Revit placed it off the asked point and would not move " \
+               u"it back: {0}".format(to_text(exc))
+    return u"Revit placed it {0} m off the asked point and it was moved " \
+           u"back.".format(model.format_metres(
+               model.feet_to_metres(max(abs(value) for value in delta))))
+
+
+def diagnose(frame, shared_feet, internal, placed, actual_shared_feet):
+    """Everything the conversion did, in one block, for when it is wrong.
+
+    Printed only on a mismatch. Two numbers in a dialog are not enough to
+    work out which step went wrong, and the alternative is guessing from
+    them, which is how this tool got shipped with a fault in it.
+    """
+    output.print_md(u"#### What the conversion did")
+    output.print_md(u"_All in feet unless said otherwise._")
+    output.print_md(u"```")
+    output.print_md(u"frame origin  E {0}  N {1}  Z {2}".format(
+        *[repr(value) for value in frame.origin]))
+    output.print_md(u"frame x_axis  {0}".format(repr(frame.x_axis)))
+    output.print_md(u"frame y_axis  {0}".format(repr(frame.y_axis)))
+    output.print_md(u"determinant   {0}".format(repr(frame.determinant())))
+    output.print_md(u"asked, shared {0}".format(repr(tuple(shared_feet))))
+    output.print_md(u"computed, int {0}".format(repr(tuple(internal))))
+    if placed is not None:
+        output.print_md(u"placed at,int ({0}, {1}, {2})".format(
+            repr(placed.X), repr(placed.Y), repr(placed.Z)))
+    output.print_md(u"read back,shr {0}".format(repr(tuple(actual_shared_feet))))
+    output.print_md(u"```")
+
+
 def report(typed, actual, level_name, offset_feet, below_all, notes):
     output.print_md(u"### {0}".format(TITLE))
     output.print_md(u"| | Easting | Northing | Elevation |")
@@ -369,6 +423,21 @@ def run():
                         title=TITLE)
             return
 
+        note = move_to(instance, internal, placed)
+        if note:
+            notes.append(note)
+            try:
+                placed = instance.Location.Point
+            except BaseException as exc:
+                logger.debug(to_text(exc))
+                placed = None
+            if placed is None:
+                transaction.RollBack()
+                forms.alert(u"The marker moved but its position could not "
+                            u"be read back, so nothing was kept.",
+                            title=TITLE)
+                return
+
         actual_shared_feet = shared_of(doc, placed)
         if actual_shared_feet is None:
             transaction.RollBack()
@@ -380,12 +449,14 @@ def run():
                        for value in actual_shared_feet)
         ok, deltas = model.agree(typed, actual)
         if not ok:
+            diagnose(frame, shared_feet, internal, placed, actual_shared_feet)
             transaction.RollBack()
             forms.alert(
                 u"The marker did not land where it was asked to, so "
-                u"nothing was kept.\n\n{0}\n\nThis is the conversion "
-                u"being wrong, not the model.".format(
-                    model.describe_deltas(deltas)),
+                u"nothing was kept.\n\n{0}\n\nThe numbers behind it are "
+                u"in the output window. Send them on rather than reading "
+                u"them: two deltas are not enough to say which step is "
+                u"wrong.".format(model.describe_deltas(deltas)),
                 title=TITLE)
             logger.error(u"coordinate mismatch: {0}".format(
                 model.describe_deltas(deltas)))

@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.26.0.** The authoritative number is `__version__` in
+**Version 2.26.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -226,7 +226,8 @@ does not.
 | 2.24.0 | Imports in Families no longer hidden; imported files found through their elements | Worked |
 | 2.25.0 | Diagnose Invisibility reports a visible element drawing on a hidden category | Worked |
 | 2.25.1 | The copied tool is AVH's to maintain; no re-sync with pyRevit is promised | Worked |
-| 2.26.0 | Tools panel: Place at Coordinate | Shipped, needs the marker family |
+| 2.26.0 | Tools panel: Place at Coordinate | Landed 3 m out in Z and 58 km out in plan |
+| 2.26.1 | A snapped placement is moved back, and a mismatch prints the numbers | Current |
 
 ## Licence
 

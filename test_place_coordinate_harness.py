@@ -139,7 +139,9 @@ class FakeLocation(object):
 
 
 class FakeInstance(object):
-    def __init__(self, point, symbol, level, missing_params=()):
+    def __init__(self, point, symbol, level, missing_params=(), doc=None):
+        self.Document = doc
+        self.Id = id(self)
         self.Location = FakeLocation(point)
         self.symbol = symbol
         self.level = level
@@ -174,11 +176,31 @@ class FakeCreate(object):
                              point.Y + self.doc.place_offset[1],
                              point.Z + self.doc.place_offset[2])
         instance = FakeInstance(actual, symbol, level,
-                                self.doc.missing_params)
+                                self.doc.missing_params, doc=self.doc)
         if self.doc.no_location:
             instance.Location = None
         self.doc.instances.append(instance)
         return instance
+
+
+class FakeTransformUtils(object):
+    """Revit moving an element, and refusing to when a scenario says so."""
+
+    doc = None
+
+    @staticmethod
+    def MoveElement(document, element_id, delta):
+        doc = FakeTransformUtils.doc
+        if doc is not None and doc.move_raises:
+            raise Exception("this element cannot be moved")
+        for instance in doc.instances:
+            if instance.Id == element_id:
+                point = instance.Location.Point
+                instance.Location = FakeLocation(FakeXYZ(
+                    point.X + delta.X, point.Y + delta.Y, point.Z + delta.Z))
+                doc.moves.append((delta.X, delta.Y, delta.Z))
+                return
+        raise Exception("no such element")
 
 
 class FakeDocument(object):
@@ -186,7 +208,7 @@ class FakeDocument(object):
                  location_raises=False, load_succeeds=True,
                  place_offset=None, place_raises=False,
                  missing_params=(), no_location=False,
-                 commit_status="Committed"):
+                 commit_status="Committed", move_raises=False):
         self.ActiveProjectLocation = FakeProjectLocation(
             degenerate=degenerate, raises=location_raises)
         self.symbols = list(symbols)
@@ -200,6 +222,9 @@ class FakeDocument(object):
         self.missing_params = set(missing_params)
         self.no_location = no_location
         self.commit_status = commit_status
+        self.move_raises = move_raises
+        self.moves = []
+        FakeTransformUtils.doc = self
 
     def LoadFamily(self, path):
         self.load_calls.append(path)
@@ -303,6 +328,7 @@ def run_script(doc, answers=(), confirm=True):
         TransactionStatus=Namespace(Committed="Committed"),
         Structure=Namespace(
             StructuralType=Namespace(NonStructural="NonStructural")),
+        ElementTransformUtils=FakeTransformUtils,
     )
 
     pyrevit = types.ModuleType("pyrevit")
@@ -561,27 +587,51 @@ check("a missing parameter is reported but still placed",
 # 4. The readback, which is the whole point
 # --------------------------------------------------------------------------
 
-# A transform inverted the wrong way looks exactly like this: the marker
-# appears, somewhere plausible, and nothing says otherwise.
+# Revit snapping the instance to the level is what the first live run hit:
+# the elevation came back exactly 3.000 m out. The tool moves it back and
+# carries on, because it knows where the point belongs in internal
+# coordinates.
 doc = FakeDocument(symbols=[marker()], levels=levels(),
-                   place_offset=(0.5 * FEET, 0.0, 0.0))
+                   place_offset=(0.0, 0.0, -3.0 * FEET))
 recorder = run_script(doc, answers=ANSWERS)
-check("wrong landing: rolled back, nothing kept", not doc.instances,
-      str(len(doc.instances)))
+check("snapped placement: moved back and kept", len(doc.instances) == 1,
+      recorder.text())
+landed = placed_shared(doc)
+check("snapped placement: and it ends up on the typed coordinate",
+      landed is not None and all(close(landed[i], TARGET[i], 1e-3)
+                                 for i in range(3)),
+      u"{0} vs {1}".format(landed, TARGET))
+check("snapped placement: the move is reported, not hidden",
+      u"moved back" in recorder.text(), recorder.text())
+check("snapped placement: exactly one move",
+      len(doc.moves) == 1, str(doc.moves))
+
+# Correcting the placement is not the same as trusting it. When the move
+# cannot happen, the readback still has to catch the bad position.
+doc = FakeDocument(symbols=[marker()], levels=levels(),
+                   place_offset=(0.5 * FEET, 0.0, 0.0), move_raises=True)
+recorder = run_script(doc, answers=ANSWERS)
+check("wrong landing that cannot be corrected: rolled back",
+      not doc.instances, str(len(doc.instances)))
 check("wrong landing: the axis is named",
       u"easting off by" in recorder.text(), recorder.text())
-check("wrong landing: said to be the conversion, not the model",
-      u"conversion being wrong" in recorder.text())
+check("wrong landing: the numbers are in the output window",
+      u"What the conversion did" in recorder.text(), recorder.text())
+check("wrong landing: the derived frame is in there",
+      u"frame origin" in recorder.text() and
+      u"determinant" in recorder.text())
+check("wrong landing: and the point it actually landed on",
+      u"placed at,int" in recorder.text())
 check("wrong landing: no success report",
       u"Asked for" not in recorder.text())
 
-# Half a millimetre is not a mismatch. A tolerance that trips on rounding
-# is a tolerance somebody switches off.
-doc = FakeDocument(symbols=[marker()], levels=levels(),
-                   place_offset=(0.0005 * FEET, 0.0, 0.0))
+# Nothing to correct means no move at all. A model marked as changed for
+# nothing is a sync somebody has to do.
+doc = FakeDocument(symbols=[marker()], levels=levels())
 recorder = run_script(doc, answers=ANSWERS)
-check("half a millimetre is not a mismatch", len(doc.instances) == 1,
-      recorder.text())
+check("an exact placement is not moved", not doc.moves, str(doc.moves))
+check("an exact placement says nothing about moving",
+      u"moved back" not in recorder.text())
 
 doc = FakeDocument(symbols=[marker()], levels=levels(), no_location=True)
 recorder = run_script(doc, answers=ANSWERS)
