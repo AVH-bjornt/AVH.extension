@@ -101,7 +101,6 @@ def _locale_string_from_xaml(xaml_base_path, key):
     return key
 
 
-
 def _t(key, default=None):
     """Look up a localized UI string for the current pyRevit / Revit
     language, falling back to en_us and then to `default`.
@@ -739,7 +738,6 @@ def diagnose_invisibility(element, view, visible_ids=None):
         reasons_short.append("Hidden unknown")
 
     return reasons, reasons_short
-
 
 
 # --- AVH addition ----------------------------------------------------------
