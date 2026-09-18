@@ -42,6 +42,26 @@ for root, dirs, files in os.walk(HERE):
         else:
             SHIPPED.append(path)
 
+
+# Files copied in from somewhere else rather than written here. See
+# THIRD_PARTY.md for what they are and where they came from.
+#
+# They still have to run on IronPython, so the encoding declaration, the
+# unicode literal rule, the ASCII pushbutton rule and the Python 2 grammar
+# parse all apply to them unchanged. The one rule that does not is rule 4,
+# the ban on bare str().
+#
+# Rule 4 exists because str() on a Revit name raises on the first
+# Icelandic character. Every hit in Diagnose Invisibility is str() on an
+# ElementId, used as a fallback when a name is unavailable, never on a
+# name, so the hazard the rule guards against is not present. Editing
+# somebody else's file to satisfy a rule it does not break would only make
+# the next re-sync from pyRevit harder to do.
+THIRD_PARTY = set([
+    os.path.join("AVH.tab", "Tools.panel",
+                 "Diagnose Invisibility.pushbutton", "script.py"),
+])
+
 results = []
 
 
@@ -160,6 +180,9 @@ STR_ALLOWED = re.compile(r"(text_type|binary_type|isinstance|writestr|"
                          r"str\)|= str|_u = str)")
 
 for path in SHIPPED:
+    if rel(path) in THIRD_PARTY:
+        check("{0}: third party, rule 4 not applied".format(rel(path)), True)
+        continue
     text = read(path)
     code = re.sub(r'"""(?:.|\n)*?"""', '""', text)
     code = "\n".join(line for line in code.split("\n")
@@ -272,6 +295,14 @@ for path in SHIPPED:
           "os.path.isdir(os.path.join(_EXT_DIR" in text,
           "counts directory levels instead, which breaks the moment the "
           "button is nested in a pulldown")
+
+
+# --- every third party exemption still names a file that exists --------
+
+for entry in sorted(THIRD_PARTY):
+    check("third party exemption is still live: {0}".format(entry),
+          os.path.isfile(os.path.join(HERE, entry)),
+          "delete the entry from THIRD_PARTY, the file is gone")
 
 
 # --- report -----------------------------------------------------------

@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.19.0.** The authoritative number is `__version__` in
+**Version 2.23.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -100,6 +100,15 @@ pick which kind of warning to isolate, since most models are mostly
 selected, as one box with a margin. Stays in the view you are in and
 changes nothing in the model.
 
+**Diagnose Invisibility.** Select one or more elements, pick a view, and
+it prints why each one is not visible there: workset, phase filter,
+design option, category or subcategory hidden, explicitly hidden, a view
+filter, the crop region, a 3D section box, the view range, a view
+template, an element belonging to another view, or the view's
+discipline. Reports only, changes nothing. This one is pyRevit's tool
+rather than AVH's, copied in until it reaches a pyRevit release. See
+`THIRD_PARTY.md`.
+
 ### Data
 
 **Room Data Sync (BETA).** Copies each room's `CCIMultiLevelLocationID`
@@ -183,6 +192,14 @@ to Autodesk Forma from.
 | 2.22.3 | The marker's own parameters are read instead of a parameter name being guessed | Ran, resolved to the wrong view |
 | 2.22.4 | View templates excluded, disagreeing parameters refuse, the resolved view is named | Worked, Sections confirmed |
 | 2.22.5 | A near miss beside a successful resolution goes to the output window, not the dialog | Shipped |
+| 2.23.0 | Diagnose Invisibility copied in from pyRevit; extension licensed GPL v3 | Current |
+
+## Licence
+
+GPL v3, in `LICENSE`. The extension carries that licence because parts
+of it come from pyRevit and pyApex, which are both GPL v3.
+`THIRD_PARTY.md` says which parts and where from. This places no limit
+on AVH using the tools, internally or on paid work.
 
 ## Notes for whoever maintains this
 
