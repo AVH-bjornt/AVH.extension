@@ -229,7 +229,7 @@ does not.
 | 2.26.0 | Tools panel: Place at Coordinate | Landed 3 m out in Z and 58 km out in plan |
 | 2.26.1 | A snapped placement is moved back, and a mismatch prints the numbers | Doubled the position instead |
 | 2.26.2 | The document is regenerated before a new element's position is read | Worked |
-| 2.27.0 | Asked and reported northing first, to match Revit; the model's own origin is shown | Current |
+| 2.27.0 | Asked and reported northing first, to match Revit; the model's own origin is shown | Confirmed: lands on the survey point |
 
 ## Licence
 
