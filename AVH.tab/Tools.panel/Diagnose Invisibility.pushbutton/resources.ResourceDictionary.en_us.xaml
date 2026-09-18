@@ -30,4 +30,6 @@
     <sys:String x:Key="reason_view_discipline">View discipline is set to '{}' - some categories are shown or hidden automatically based on discipline, independent of Visibility/Graphics settings</sys:String>
     <sys:String x:Key="reason_unknown">Element is not visible but no specific cause could be determined. Possible causes: view-specific element type (e.g. annotation from another view), linked model visibility, or detail level.</sys:String>
 
+    <sys:String x:Key="note_geometry_category_hidden">Visible, but part of its geometry is drawn on category '{}', which is hidden in this view, so that part is not shown.</sys:String>
+
 </ResourceDictionary>

@@ -32,8 +32,15 @@ the first click raised `AttributeError` and the button never opened. `_t`
 looks the function up rather than calling it, so pyRevit's own is used
 where it exists and no edit is needed when the release catches up.
 
-`test_diagnose_fallback_harness.py` covers that stand in, 15 checks. The
-tool itself is not tested here: it is not AVH's code.
+A third change adds `diagnose_partial_visibility`, which reports a
+visible element whose geometry draws on a hidden category. pyRevit's tool
+answers "is this element visible", which is a different question from "is
+all of it drawn", and the second is what a toilet built from an imported
+DWG fails. Offered back to pyRevit; delete it from here on the release
+that carries it.
+
+`test_diagnose_additions_harness.py` covers both AVH additions, 33
+checks. The tool itself is not tested here: it is not AVH's code.
 
 The icon is AVH's, because the original sat inside a pulldown and had
 none of its own.

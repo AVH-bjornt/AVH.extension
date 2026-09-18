@@ -20,6 +20,11 @@ chosen view, and print a per-element report of the reason(s)."""
 #   applocales.get_locale_string_from_xaml added, because that function is
 #   on pyRevit's develop branch only and the button raised AttributeError
 #   on the release AVH runs. Marked "AVH addition" in the body.
+#   18 September 2026, diagnose_partial_visibility and _geometry_categories
+#   added, plus four lines in main() that call them, reporting when a
+#   visible element has geometry on a hidden category. Marked "AVH
+#   addition" in the body. Offered upstream; delete on the release that
+#   carries it.
 # Nothing else in this file was changed.
 #
 # It was copied because the tool is merged into pyRevit's develop branch but
@@ -736,6 +741,142 @@ def diagnose_invisibility(element, view, visible_ids=None):
     return reasons, reasons_short
 
 
+
+# --- AVH addition ----------------------------------------------------------
+# Being visible as an element and having all of your geometry drawn are two
+# different things, and nothing above notices the difference.
+#
+# A Plumbing Fixture built from an imported DWG draws that geometry on
+# Imports in Families, which is a different category from the element's own.
+# Switch that category off and the fixture is still visible, still
+# selectable, still reported visible by everything above, and no longer on
+# screen. That cost a day on 18 Sep 2026, with this tool open, reporting
+# visible, and correct.
+#
+# The GraphicsStyle on each geometry object is the only place the real set
+# of categories shows up. This is additive on purpose: diagnose_invisibility
+# keeps its signature and its behaviour, and main() asks this separately for
+# elements that came back visible.
+# ---------------------------------------------------------------------------
+
+def _geometry_categories(element, view):
+    """Every category the element's geometry actually draws on.
+
+    Read at the view's own detail level, because which geometry exists at
+    all depends on it. Returns Category objects without duplicates, in the
+    order met. An element whose geometry cannot be read returns an empty
+    list: saying nothing beats saying something wrong.
+    """
+    doc = element.Document
+    style_ids = []
+
+    def remember(style_id):
+        if style_id is None:
+            return
+        try:
+            if style_id == DB.ElementId.InvalidElementId:
+                return
+        except Exception:
+            return
+        style_ids.append(style_id)
+
+    def walk(geometry, depth):
+        # Nested families go a few levels deep and no further. A depth cap
+        # is cheaper than trusting every family in the model to be sane.
+        if geometry is None or depth > 3:
+            return
+        try:
+            items = list(geometry)
+        except Exception:
+            return
+        for item in items:
+            try:
+                remember(item.GraphicsStyleId)
+            except Exception:
+                pass
+            try:
+                nested = item.GetInstanceGeometry()
+            except Exception:
+                nested = None
+            if nested is not None:
+                walk(nested, depth + 1)
+
+    try:
+        options = DB.Options()
+        options.View = view
+        walk(element.get_Geometry(options), 0)
+    except Exception:
+        return []
+
+    # Dedupe on the category, not the style: a category has a projection
+    # style and a cut style, and reporting it twice reads as two faults.
+    found = []
+    seen = set()
+    for style_id in style_ids:
+        try:
+            style = doc.GetElement(style_id)
+        except Exception:
+            style = None
+        if style is None:
+            continue
+        try:
+            category = style.GraphicsStyleCategory
+        except Exception:
+            category = None
+        if category is None:
+            continue
+        try:
+            key = get_elementid_value(category.Id)
+        except Exception:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(category)
+    return found
+
+
+def diagnose_partial_visibility(element, view):
+    """Why a visible element might still not be fully drawn.
+
+    Returns (notes, notes_short), both empty when nothing is amiss. The
+    element's own category is skipped: if that were hidden the element
+    would not be visible at all and would have been explained above.
+    """
+    notes = []
+    notes_short = []
+
+    try:
+        own_category = element.Category
+        own_id = own_category.Id if own_category is not None else None
+    except Exception:
+        own_id = None
+
+    for category in _geometry_categories(element, view):
+        try:
+            category_id = category.Id
+        except Exception:
+            continue
+        try:
+            if own_id is not None and category_id == own_id:
+                continue
+            if not view.GetCategoryHidden(category_id):
+                continue
+            name = category.Name
+        except Exception:
+            continue
+        notes.append(
+            _t(
+                "note_geometry_category_hidden",
+                "Visible, but part of its geometry is drawn on category"
+                " '{}', which is hidden in this view, so that part is not"
+                " shown.",
+            ).format(name)
+        )
+        notes_short.append("Geometry category hidden")
+
+    return notes, notes_short
+
 # ---------------------------------------------------------------------------
 # UI / entry point
 # ---------------------------------------------------------------------------
@@ -811,6 +952,12 @@ def main():
                             link, _t("status_visible", "Visible in this view.")
                         )
                     )
+                    # AVH addition: visible is not the same as fully drawn.
+                    partial, _partial_short = diagnose_partial_visibility(
+                        element, view
+                    )
+                    for note in partial:
+                        output.print_md("- {}".format(note))
                 else:
                     hidden_count += 1
                     output.print_md(

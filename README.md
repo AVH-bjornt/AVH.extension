@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.24.0.** The authoritative number is `__version__` in
+**Version 2.25.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -105,9 +105,15 @@ it prints why each one is not visible there: workset, phase filter,
 design option, category or subcategory hidden, explicitly hidden, a view
 filter, the crop region, a 3D section box, the view range, a view
 template, an element belonging to another view, or the view's
-discipline. Reports only, changes nothing. This one is pyRevit's tool
-rather than AVH's, copied in until it reaches a pyRevit release. See
-`THIRD_PARTY.md`.
+discipline. Reports only, changes nothing.
+
+It also reports a **visible** element whose geometry draws on a hidden
+category, which is how a toilet can be visible, selectable and not on
+screen. That check is AVH's addition and has been offered back to
+pyRevit.
+
+This one is pyRevit's tool rather than AVH's, copied in until it reaches
+a pyRevit release. See `THIRD_PARTY.md`.
 
 ### Data
 
@@ -202,7 +208,8 @@ does not.
 | 2.22.5 | A near miss beside a successful resolution goes to the output window, not the dialog | Shipped |
 | 2.23.0 | Diagnose Invisibility copied in from pyRevit; extension licensed GPL v3 | AttributeError on first click |
 | 2.23.1 | A locale helper that exists only on pyRevit's develop branch is stood in for | Worked |
-| 2.24.0 | Imports in Families no longer hidden; imported files found through their elements | Current |
+| 2.24.0 | Imports in Families no longer hidden; imported files found through their elements | Worked |
+| 2.25.0 | Diagnose Invisibility reports a visible element drawing on a hidden category | Current |
 
 ## Licence
 
