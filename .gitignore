@@ -4,3 +4,10 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Files delivered into this folder by a Claude session. They land here
+# because it is the connected folder, not because they belong to the
+# extension, and `git add -A` swept one set into a commit on 18 Sep 2026.
+# Anything tracked here is cloned onto every colleague's machine by
+# pyRevit Update, so this is not cosmetic.
+Claude outputs/
