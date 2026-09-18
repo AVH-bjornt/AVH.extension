@@ -23,13 +23,18 @@ chosen view, and print a per-element report of the reason(s)."""
 #   18 September 2026, diagnose_partial_visibility and _geometry_categories
 #   added, plus four lines in main() that call them, reporting when a
 #   visible element has geometry on a hidden category. Marked "AVH
-#   addition" in the body. Offered upstream; delete on the release that
-#   carries it.
+#   addition" in the body.
 # Nothing else in this file was changed.
 #
-# It was copied because the tool is merged into pyRevit's develop branch but
-# has not reached a release yet. When it does, delete this folder and use
-# pyRevit's own rather than maintaining a second copy of it.
+# AVH maintains this file from here on. It was copied at the commit above
+# and is not tracked against pyRevit: a later pyRevit release carrying its
+# own version does not replace this one, and any fix they make to theirs
+# will not arrive here. That is a deliberate choice, made on 18 September
+# 2026, and its price is that this file's faults are AVH's to find.
+#
+# The licence obligations do not go away with the tracking. Attribution
+# above, GPL v3 in LICENSE at the repository root, details in
+# THIRD_PARTY.md.
 # ---------------------------------------------------------------------------
 
 import os                                  # AVH, for the fallback below

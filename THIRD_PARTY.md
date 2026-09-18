@@ -36,8 +36,7 @@ A third change adds `diagnose_partial_visibility`, which reports a
 visible element whose geometry draws on a hidden category. pyRevit's tool
 answers "is this element visible", which is a different question from "is
 all of it drawn", and the second is what a toilet built from an imported
-DWG fails. Offered back to pyRevit; delete it from here on the release
-that carries it.
+DWG fails.
 
 `test_diagnose_additions_harness.py` covers both AVH additions, 33
 checks. The tool itself is not tested here: it is not AVH's code.
@@ -45,10 +44,15 @@ checks. The tool itself is not tested here: it is not AVH's code.
 The icon is AVH's, because the original sat inside a pulldown and had
 none of its own.
 
-It was copied because the tool is merged but has not reached a pyRevit
-release. **When it does, delete the folder and use pyRevit's own.**
-Keeping a second copy of somebody else's maintained tool is a cost with
-no return.
+It was copied because the tool was merged but had not reached a pyRevit
+release.
+
+**AVH maintains this copy from here on.** It is a snapshot of that commit,
+not a tracked fork: a later pyRevit release carrying its own version does
+not replace this one, and fixes they make to theirs will not arrive here.
+Decided on 18 September 2026, and the price is that this file's faults
+are AVH's to find. If somebody later wants to swap back to pyRevit's,
+that is a fresh decision with the AVH additions to carry across by hand.
 
 Every other file in this extension imports pyRevit's libraries, which is
 ordinary use of the platform rather than copying from it.

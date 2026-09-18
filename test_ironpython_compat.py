@@ -55,8 +55,8 @@ for root, dirs, files in os.walk(HERE):
 # Icelandic character. Every hit in Diagnose Invisibility is str() on an
 # ElementId, used as a fallback when a name is unavailable, never on a
 # name, so the hazard the rule guards against is not present. Editing
-# somebody else's file to satisfy a rule it does not break would only make
-# the next re-sync from pyRevit harder to do.
+# somebody else's file to satisfy a rule it does not break would only be
+# churn in a file nobody here wrote.
 THIRD_PARTY = set([
     os.path.join("AVH.tab", "Tools.panel",
                  "Diagnose Invisibility.pushbutton", "script.py"),
