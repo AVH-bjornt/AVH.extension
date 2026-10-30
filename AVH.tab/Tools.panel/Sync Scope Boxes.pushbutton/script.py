@@ -2,9 +2,17 @@
 """Copy scope boxes in from a linked model, and keep them current.
 
 Pick a link. Every scope box in it is compared with the copies already
-in this model: new ones are copied in, changed ones are replaced,
-unchanged ones are left alone. Nothing is written until a dry run has
-been shown and confirmed.
+in this model, and the new and changed ones are offered in a tick list.
+Only what is ticked is written: ticked new boxes are copied in, ticked
+changed boxes are replaced. Nothing starts ticked.
+
+## The tick list is the consent, except for replacements
+
+2.28.0 asked one yes or no for everything the link offered, which made
+it all or nothing. Now the tick list decides what is written. A
+replacement still gets a confirmation after it, because a replaced box
+has a new element id and that warning belongs in front of the person
+choosing it. Ticking only new boxes asks nothing further.
 
 ## Copies are named after their link
 
@@ -51,7 +59,7 @@ __title__ = "Sync Scope\nBoxes"
 __author__ = "AVH"
 __doc__ = ("Copy scope boxes in from a linked model, replace the ones "
            "that changed there, and keep views and datums assigned to "
-           "them. Shows a dry run first.")
+           "them. You tick which ones.")
 
 import os
 import sys
@@ -402,10 +410,36 @@ def print_plan(plan, label):
         shown += 1
 
 
-def confirmation(plan, uses):
+def pick_boxes(plan):
+    """The writes the user ticked, or [] when nothing was.
+
+    Labels go in and labels come back, mapped to targets by exact text.
+    pyRevit's SelectFromList returns only the ticked items and never
+    touches a .state attribute, which is what made two pyApex ports
+    select nothing; passing strings and mapping back avoids depending on
+    either behaviour.
+    """
+    entries = model.picker_entries(plan)
+    if not entries:
+        return []
+    by_label = dict(entries)
+    picked = forms.SelectFromList.show(
+        [label for label, _target in entries], multiselect=True,
+        title=TITLE + u": tick the scope boxes to copy or replace",
+        button_name="Copy / replace ticked")
+    if not picked:
+        return []
+    if not isinstance(picked, list):
+        picked = [picked]
+    targets = [by_label[to_text(item)] for item in picked
+               if to_text(item) in by_label]
+    return model.chosen(plan, targets)
+
+
+def confirmation(to_write, uses):
     lines = []
-    new = [entry for entry in plan if entry[0] == model.NEW]
-    changed = [entry for entry in plan if entry[0] == model.CHANGED]
+    new = [entry for entry in to_write if entry[0] == model.NEW]
+    changed = [entry for entry in to_write if entry[0] == model.CHANGED]
     if new:
         lines.append(u"Copy in {0} new scope box(es).".format(len(new)))
     if changed:
@@ -464,10 +498,13 @@ def run():
     plan = model.classify(link_boxes, host_boxes, label)
     print_plan(plan, label)
 
-    to_write = model.writes(plan)
-    if not to_write:
+    if not model.writes(plan):
         forms.alert(u"Every scope box from {0} is already here and "
                     u"unchanged.".format(label), title=TITLE)
+        return
+
+    to_write = pick_boxes(plan)
+    if not to_write:
         return
 
     # Every assignment is read before anything is written, so the
@@ -477,8 +514,9 @@ def run():
         if state == model.CHANGED:
             uses[target] = assignments(doc, host_box.element_id)
 
-    if not forms.alert(confirmation(plan, uses), title=TITLE,
-                       yes=True, no=True):
+    replacing = any(entry[0] == model.CHANGED for entry in to_write)
+    if replacing and not forms.alert(confirmation(to_write, uses),
+                                     title=TITLE, yes=True, no=True):
         return
 
     workset_id = conventional_workset_id(doc)

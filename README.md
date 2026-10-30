@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.28.0.** The authoritative number is `__version__` in
+**Version 2.29.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -117,12 +117,14 @@ have is reported rather than fatal, so a renamed one shows up in the
 output instead of stopping the run.
 
 **Sync Scope Boxes.** Pick a linked model and its scope boxes are
-compared with the copies already in this model: new ones are copied in,
-changed ones are replaced, unchanged ones are left alone. Copies are
+compared with the copies already in this model. The new and changed ones
+are offered in a tick list, nothing ticked to start with, and only what
+you tick is written: new boxes are copied in, changed ones replaced. A
+changed box says how far it moved. Ticking a replacement asks once more
+before anything is written; ticking only new boxes does not. Copies are
 named after their link, for example `ELG_ARK - DA11`, and the tool only
 ever touches boxes carrying that link's prefix, so scope boxes you made
-yourself are never matched or replaced. A dry run is shown first and
-nothing is written until you confirm.
+yourself are never matched or replaced.
 
 Revit cannot resize a scope box, so a changed one is **replaced**: the
 new box is copied in, every view, grid, level and reference plane
@@ -245,7 +247,8 @@ does not.
 | 2.26.1 | A snapped placement is moved back, and a mismatch prints the numbers | Doubled the position instead |
 | 2.26.2 | The document is regenerated before a new element's position is read | Worked |
 | 2.27.0 | Asked and reported northing first, to match Revit; the model's own origin is shown | Confirmed: lands on the survey point |
-| 2.28.0 | Tools panel: Sync Scope Boxes | Shipped, untested in Revit |
+| 2.28.0 | Tools panel: Sync Scope Boxes | One yes or no for everything; all or nothing |
+| 2.29.0 | Sync Scope Boxes: tick which boxes to copy or replace | Current |
 
 ## Licence
 

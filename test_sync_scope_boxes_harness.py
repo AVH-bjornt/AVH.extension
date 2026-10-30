@@ -442,15 +442,40 @@ class Namespace(object):
             setattr(self, key, value)
 
 
+ALL = "tick everything"
+CANCEL = "close the list"
+
+
 class Recorder(object):
-    def __init__(self, pick=None, confirm=True):
+    """Plays the user. Two lists are shown: the link, then the boxes.
+
+    `tick` decides the box list: ALL ticks every offered label, CANCEL
+    closes the list, and a list of strings ticks every label containing
+    any of them, so a scenario can say "tick DA12" without spelling out
+    the label text.
+    """
+
+    def __init__(self, pick=None, confirm=True, tick=ALL):
         self.pick = pick
         self.confirm = confirm
+        self.tick = tick
         self.alerts = []
+        self.questions = []
         self.printed = []
         self.offered = None
+        self.box_offered = None
+        self.box_kwargs = None
 
     def show(self, items, **kwargs):
+        if kwargs.get("multiselect"):
+            self.box_offered = list(items)
+            self.box_kwargs = kwargs
+            if self.tick == CANCEL:
+                return None
+            if self.tick == ALL:
+                return list(items)
+            return [item for item in items
+                    if any(word in item for word in self.tick)]
         self.offered = list(items)
         if self.pick is None:
             return items[0] if items else None
@@ -459,6 +484,7 @@ class Recorder(object):
     def alert(self, message, **kwargs):
         self.alerts.append(message)
         if kwargs.get("yes") and kwargs.get("no"):
+            self.questions.append(message)
             return self.confirm
         return None
 
@@ -469,10 +495,10 @@ class Recorder(object):
         return u"\n".join(self.alerts + self.printed)
 
 
-def run_script(doc, pick=None, confirm=True, rename_mode="ok"):
+def run_script(doc, pick=None, confirm=True, rename_mode="ok", tick=ALL):
     del FakeTransaction.log[:]
     doc.rename_mode_for_copies = rename_mode
-    recorder = Recorder(pick=pick, confirm=confirm)
+    recorder = Recorder(pick=pick, confirm=confirm, tick=tick)
 
     db = Namespace(
         FilteredElementCollector=FakeCollector,
@@ -867,13 +893,18 @@ check("rejected commit: the user is told it was rejected",
 # 5. Nothing written when it should not be
 # --------------------------------------------------------------------------
 
-doc, link_doc = setup([link_box(u"DA11")])
+old_copy = host_copy_of(link_box(u"DA11"))
+held_view = FakeView(u"Plan Held", old_copy.Id)
+doc, link_doc = setup([link_box(u"DA11", (15, 0, 0))], [old_copy, held_view])
 recorder = run_script(doc, confirm=False)
-check("declined: nothing copied", not boxes_in(doc))
-check("declined: no transaction", not FakeTransaction.log,
+check("replacement declined: the old box is untouched",
+      old_copy in doc.elements and len(boxes_in(doc)) == 1)
+check("replacement declined: its view still points at it",
+      assigned(held_view, VIEW_PARAM) == old_copy.Id)
+check("replacement declined: no transaction", not FakeTransaction.log,
       str(FakeTransaction.log))
-check("declined: the dry run was still shown",
-      u"new in the link" in recorder.text())
+check("replacement declined: the question was asked",
+      len(recorder.questions) == 1, str(len(recorder.questions)))
 
 doc = FakeDocument([])
 recorder = run_script(doc)
@@ -890,6 +921,114 @@ check("not workshared: still copied",
       box_named(doc, u"ELG_ARK - DA11") is not None)
 check("not workshared: and says why it is not on the workset",
       u"not workshared" in recorder.text(), recorder.text())
+
+
+# --------------------------------------------------------------------------
+# 6. Choosing which boxes
+# --------------------------------------------------------------------------
+
+def offered_targets(recorder):
+    return [label.split(u"   (")[0] for label in (recorder.box_offered or [])]
+
+
+# One of each state, so the list can be checked for what it leaves out.
+keep = link_box(u"KEEP", (0, 0, 0))
+moved_src = link_box(u"MOVED", (300, 0, 0))
+moved_old = host_copy_of(link_box(u"MOVED", (300, 0, 0)))
+fresh_a = link_box(u"FRESH_A", (600, 0, 0))
+fresh_b = link_box(u"FRESH_B", (900, 0, 0))
+dup_1 = link_box(u"TWICE", (1200, 0, 0))
+dup_2 = link_box(u"TWICE", (1500, 0, 0))
+gone = FakeScopeBox(u"ELG_ARK - GONE", box_corners((50, 50, 0), (5, 5, 5)))
+moved_view = FakeView(u"Plan Moved", moved_old.Id)
+link_list = [keep, link_box(u"MOVED", (330, 0, 0)), fresh_a, fresh_b,
+             dup_1, dup_2]
+host_list = [host_copy_of(keep), moved_old, gone, moved_view]
+
+doc, link_doc = setup(link_list, host_list)
+recorder = run_script(doc, tick=[u"FRESH_B"])
+
+check("list: offers exactly the new and the changed",
+      sorted(offered_targets(recorder)) ==
+      sorted([u"ELG_ARK - MOVED", u"ELG_ARK - FRESH_A",
+              u"ELG_ARK - FRESH_B"]), str(recorder.box_offered))
+check("list: unchanged, orphaned and doubled boxes are not offered",
+      not any(word in u" ".join(recorder.box_offered or [])
+              for word in (u"KEEP", u"GONE", u"TWICE")),
+      str(recorder.box_offered))
+check("list: a new box says it will be copied in",
+      any(u"FRESH_A" in l and u"new, copy in" in l
+          for l in recorder.box_offered or []), str(recorder.box_offered))
+check("list: a changed box says how far it moved",
+      any(u"MOVED" in l and u"changed by up to" in l and u"mm" in l
+          for l in recorder.box_offered or []), str(recorder.box_offered))
+check("list: it is a tick list, not a single choice",
+      recorder.box_kwargs is not None and
+      recorder.box_kwargs.get("multiselect") is True)
+
+check("ticked one: only that one was copied in",
+      box_named(doc, u"ELG_ARK - FRESH_B") is not None and
+      box_named(doc, u"ELG_ARK - FRESH_A") is None,
+      str([b.Name for b in boxes_in(doc)]))
+check("ticked one: and it landed where the link shows it",
+      on_link_box(doc, u"ELG_ARK - FRESH_B", fresh_b))
+check("ticked one: the unticked changed box was not replaced",
+      moved_old in doc.elements and
+      assigned(moved_view, VIEW_PARAM) == moved_old.Id)
+check("ticked one: copying a new box asked no further question",
+      not recorder.questions, u" | ".join(recorder.questions))
+check("ticked one: committed", FakeTransaction.log == ["start", "commit"],
+      str(FakeTransaction.log))
+
+# What was not ticked is still on offer next time.
+recorder = run_script(doc, tick=CANCEL)
+check("next run: the unticked boxes are still offered",
+      sorted(offered_targets(recorder)) ==
+      sorted([u"ELG_ARK - MOVED", u"ELG_ARK - FRESH_A"]),
+      str(recorder.box_offered))
+check("next run: closing the list writes nothing",
+      not FakeTransaction.log, str(FakeTransaction.log))
+
+# Ticking the replacement asks first, and names it.
+recorder = run_script(doc, tick=[u"MOVED"])
+check("replacement ticked: asked before writing",
+      len(recorder.questions) == 1, str(len(recorder.questions)))
+# New boxes are counted in the confirmation, never named, so checking
+# for FRESH_A's name could not fail. The count is what would be wrong if
+# the question described the whole plan instead of the ticks: FRESH_A is
+# still new and unticked at this point.
+check("replacement ticked: the question names only what was ticked",
+      recorder.questions and u"MOVED" in recorder.questions[0] and
+      u"Copy in" not in recorder.questions[0],
+      u" | ".join(recorder.questions))
+check("replacement ticked: and warns about the new element id",
+      recorder.questions and u"new element id" in recorder.questions[0])
+check("replacement ticked: replaced, view moved across",
+      moved_old not in doc.elements and
+      box_named(doc, u"ELG_ARK - MOVED") is not None and
+      assigned(moved_view, VIEW_PARAM) ==
+      box_named(doc, u"ELG_ARK - MOVED").Id)
+check("replacement ticked: FRESH_A still left alone",
+      box_named(doc, u"ELG_ARK - FRESH_A") is None)
+
+# Ticking nothing and pressing the button is the same as closing it.
+doc, link_doc = setup([link_box(u"DA11")])
+recorder = run_script(doc, tick=[u"NOTHING_MATCHES"])
+check("nothing ticked: nothing written",
+      not boxes_in(doc) and not FakeTransaction.log,
+      str(FakeTransaction.log))
+
+# A mix: one new and one replacement in one run, still one question.
+old_copy = host_copy_of(link_box(u"DA11"))
+doc, link_doc = setup([link_box(u"DA11", (15, 0, 0)),
+                       link_box(u"DA12", (600, 0, 0))], [old_copy])
+recorder = run_script(doc)
+check("mixed: one question for the whole run",
+      len(recorder.questions) == 1, str(len(recorder.questions)))
+check("mixed: both written",
+      box_named(doc, u"ELG_ARK - DA12") is not None and
+      old_copy not in doc.elements and
+      box_named(doc, u"ELG_ARK - DA11") is not None)
 
 
 # --------------------------------------------------------------------------

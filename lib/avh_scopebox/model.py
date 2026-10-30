@@ -206,8 +206,47 @@ def classify(link_boxes, host_boxes, label):
 
 
 def writes(plan):
-    """The entries that change the model, in the order they run."""
+    """The entries that could change the model, in the order they run."""
     return [entry for entry in plan if entry[0] in (NEW, CHANGED)]
+
+
+def picker_entries(plan):
+    """[(label, target)] for the tick list, one per box that can be written.
+
+    Only new and changed boxes are offered. Unchanged ones, orphans and
+    doubled names have nothing to be done to them, and offering them
+    would make the list longer without giving a real choice.
+
+    The label leads with the target name so the list sorts and reads by
+    box, and says what ticking it will do. A changed box says how far
+    its worst corner moved, because a box that moved 2 mm and one that
+    moved 20 m are different decisions.
+    """
+    entries = []
+    for state, link_box, host_box, target in plan:
+        if state == NEW:
+            label = u"{0}   (new, copy in)".format(target)
+        elif state == CHANGED:
+            shift = largest_shift_mm(host_box.corners, link_box.corners)
+            if shift is None:
+                label = u"{0}   (changed, replace)".format(target)
+            else:
+                label = u"{0}   (changed by up to {1:.0f} mm, replace)".format(
+                    target, shift)
+        else:
+            continue
+        entries.append((label, target))
+    return entries
+
+
+def chosen(plan, targets):
+    """The writes for the ticked targets only, still in plan order.
+
+    Plan order rather than tick order, so a run does the same thing in
+    the same sequence however the list was clicked.
+    """
+    wanted = set(targets)
+    return [entry for entry in writes(plan) if entry[3] in wanted]
 
 
 def summary(plan):
