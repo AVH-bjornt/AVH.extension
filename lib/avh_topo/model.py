@@ -51,6 +51,27 @@ MAX_SPLITS = 3
 # limit: a number past which a toposolid gets slow to edit and regenerate.
 WARN_POINTS = 20000
 
+# The ground filter, for clouds that still hold people, vehicles and
+# plants. See `LowGrid` and `ground_filter`.
+LOW_RANK = 3
+# The filter reads the cloud twice as densely as averaging does, about
+# sixteen samples to a fully covered cell, because the ground under a
+# shrub or beside a wheel is only a few of them.
+FILTER_SAMPLES_PER_SPACING = 4.0
+WINDOW_MIN_M = 0.5
+WINDOW_MAX_M = 30.0
+WINDOW_DEFAULT_M = 4.0
+# How far a cell may stand above the opened ground and still count as
+# ground. Fixed at half a metre because AVH's sites are rough lava with
+# steps and slopes (Bjorn, 2026-11-04): a tighter limit would cut real
+# lava, a looser one would keep low cars and shrubs. A step or a steady
+# slope never reaches it, since an opening leaves both unchanged.
+FILTER_LIMIT_FT = 0.5 / METRES_PER_FOOT
+# The confirmation warns when the filter takes more than this share of
+# the cells, which usually means the window is wider than the terrain's
+# own features.
+FILTER_WARN_SHARE = 0.25
+
 SPACING_MIN_M = 0.1
 SPACING_MAX_M = 50.0
 
@@ -100,9 +121,32 @@ def spacing_error(metres):
     return u""
 
 
-def average_distance(spacing_ft):
+def window_error(metres, spacing_m):
+    """Why a filter window is unusable, or u"" when it is fine."""
+    if metres is None or metres != metres:
+        return u"The size is not a number."
+    if metres < WINDOW_MIN_M:
+        return u"Objects under {0} m are below what the filter can " \
+               u"see.".format(WINDOW_MIN_M)
+    if metres > WINDOW_MAX_M:
+        return u"Over {0} m the filter would flatten the terrain " \
+               u"itself.".format(WINDOW_MAX_M)
+    if metres < spacing_m:
+        return u"The object size has to be at least the point spacing " \
+               u"({0} m).".format(spacing_m)
+    return u""
+
+
+def average_distance(spacing_ft, samples=None):
     """The averageDistance to ask GetPoints for, in feet."""
-    return spacing_ft / SAMPLES_PER_SPACING
+    return spacing_ft / (samples or SAMPLES_PER_SPACING)
+
+
+def tile_side(spacing_ft, samples=None):
+    """A tile's side in feet, keeping a full tile's samples the same
+    whatever the sampling density: TILE_CELLS cells at the default."""
+    samples = samples or SAMPLES_PER_SPACING
+    return spacing_ft * TILE_CELLS * SAMPLES_PER_SPACING / samples
 
 
 def tiles(min_x, min_y, max_x, max_y, side):
@@ -247,6 +291,153 @@ class Grid(object):
             sx, sy, sz, count = self.cells[key]
             found.append((sx / count, sy / count, sz / count))
         return found
+
+
+class LowGrid(object):
+    """Samples sorted into square cells, keeping each cell's lowest few.
+
+    For a cloud that still holds people, vehicles and plants. Each cell
+    yields its LOW_RANK-th lowest sample, a real measured point, rather
+    than a mean. Taking the very lowest would let one stray return under
+    the ground, which scanners produce, drag the surface down; the third
+    lowest needs three of them in one cell.
+
+    A cell with fewer samples than that yields its highest one, so a
+    sparse cell is not discarded, but it is also not protected.
+
+    Same interface as Grid, so the reading code does not care which.
+    """
+
+    def __init__(self, origin_x, origin_y, spacing, rank=None):
+        self.origin_x = origin_x
+        self.origin_y = origin_y
+        self.spacing = float(spacing)
+        self.rank = rank or LOW_RANK
+        self.cells = {}
+        self.samples = 0
+
+    def key(self, x, y):
+        return (int(math.floor((x - self.origin_x) / self.spacing)),
+                int(math.floor((y - self.origin_y) / self.spacing)))
+
+    def add(self, x, y, z):
+        key = self.key(x, y)
+        low = self.cells.get(key)
+        self.samples += 1
+        if low is None:
+            self.cells[key] = [(z, x, y)]
+            return
+        if len(low) >= self.rank and z >= low[-1][0]:
+            return
+        low.append((z, x, y))
+        low.sort()
+        if len(low) > self.rank:
+            low.pop()
+
+    def by_cell(self):
+        """{cell key: (x, y, z)}, the chosen sample of each cell."""
+        found = {}
+        for key, low in self.cells.items():
+            z, x, y = low[-1]
+            found[key] = (x, y, z)
+        return found
+
+    def points(self):
+        chosen = self.by_cell()
+        return [chosen[key] for key in sorted(chosen)]
+
+
+def _sliding(values, radius, pick, empty):
+    """Min or max over a window of 2 * radius + 1, along one row."""
+    count = len(values)
+    found = [empty] * count
+    for index in range(count):
+        low = max(0, index - radius)
+        high = min(count, index + radius + 1)
+        best = empty
+        for value in values[low:high]:
+            if value is not empty and (best is empty or
+                                       pick(value, best) == value):
+                best = value
+        found[index] = best
+    return found
+
+
+def _square(rows, radius, pick, empty):
+    """Min or max over a square window, as two passes, rows then columns."""
+    rows = [_sliding(row, radius, pick, empty) for row in rows]
+    columns = [list(column) for column in zip(*rows)]
+    columns = [_sliding(column, radius, pick, empty) for column in columns]
+    return [list(row) for row in zip(*columns)]
+
+
+def window_cells(window_ft, spacing_ft):
+    """Half width, in cells, of a square window at least `window_ft` wide."""
+    return max(1, int(math.ceil(window_ft / (2.0 * spacing_ft))))
+
+
+def ground_filter(cells, spacing_ft, window_ft, limit_ft=None):
+    """Drop cells standing above the ground around them.
+
+    `cells` is {cell key: (x, y, z)}. Returns (kept points, removed
+    points), each in a stable order.
+
+    This is a morphological opening: every cell takes the lowest height
+    within the window around it (erosion), then the highest of those
+    within the same window (dilation). The result follows the ground but
+    cannot rise into anything narrower than the window, so a truck,
+    person or shrub narrower than it is cut off underneath. A cell more
+    than `limit_ft` above that opened surface is taken to be an object.
+
+    What it gets wrong, by its nature:
+
+    - A real lump of ground narrower than the window is cut the same
+      way: a lava ridge, a cairn, the crest of an embankment.
+    - Anything wider than the window survives: a building, a row of
+      parked trucks.
+    - A step or a steady slope survives intact, because an opening
+      leaves both unchanged; only things that stand up from both sides
+      are cut.
+
+    The edge of the scan and holes in it are not read as objects; see
+    the margin below. A removed cell is simply not given to Revit, which
+    fills it in from its neighbours.
+    """
+    if limit_ft is None:
+        limit_ft = FILTER_LIMIT_FT
+    if not cells:
+        return [], []
+    radius = window_cells(window_ft, spacing_ft)
+    keys = list(cells.keys())
+    # A margin of one half width all round. Without it, a plain slope
+    # loses its uphill edge: the window there finds no ground beyond the
+    # edge, so the opening comes back lower than the last cells and they
+    # read as objects. With it, the erosion is also worked out in the
+    # margin, from the cells it can reach, and the dilation then finds
+    # the edge heights again. A hole in the scan is the same case and is
+    # handled the same way, since empty cells inside are worked out too.
+    min_i = min(k[0] for k in keys) - radius
+    min_j = min(k[1] for k in keys) - radius
+    width = max(k[0] for k in keys) + radius - min_i + 1
+    depth = max(k[1] for k in keys) + radius - min_j + 1
+    empty = None
+    rows = [[empty] * width for _row in range(depth)]
+    for key, point in cells.items():
+        rows[key[1] - min_j][key[0] - min_i] = point[2]
+
+    eroded = _square(rows, radius, min, empty)
+    opened = _square(eroded, radius, max, empty)
+
+    kept = []
+    removed = []
+    for key in sorted(cells):
+        point = cells[key]
+        floor = opened[key[1] - min_j][key[0] - min_i]
+        if floor is not None and point[2] - floor > limit_ft:
+            removed.append(point)
+        else:
+            kept.append(point)
+    return kept, removed
 
 
 def extent(points):

@@ -177,7 +177,16 @@ class FakePointCloudInstance(object):
     REFUSED_FROM = 1000000
 
     def __init__(self, name, returns="cloud", transform=None, raises=False,
-                 empty=False):
+                 empty=False, ground=None, objects=(), strays=False):
+        """`ground` is the terrain, `terrain` unless given. `objects` are
+        (x0, y0, x1, y1, height, solid) in model metres: a solid one
+        hides the ground under it, as a truck roof does; a porous one
+        lets every other sample through, as a shrub or a person in a
+        crowd does. `strays` adds one return half a metre under the
+        ground at scattered places, as scanners do."""
+        self.ground = ground or terrain
+        self.objects = list(objects)
+        self.strays = strays
         self.Name = name
         self.Id = new_id()
         self.returns = returns
@@ -197,13 +206,27 @@ class FakePointCloudInstance(object):
             for column in range(columns):
                 x, y, _z = self.transform.to_model(column * step,
                                                    row * step, 0.0)
-                found.append((x, y, terrain(x, y)))
+                z = self.ground(x, y)
+                for x0, y0, x1, y1, height, solid in self.objects:
+                    if (x0 * FEET <= x <= x1 * FEET and
+                            y0 * FEET <= y <= y1 * FEET):
+                        if solid or (row + column) % 2 == 0:
+                            z += height * FEET
+                found.append((x, y, z))
+                # About one return in forty, at most two to a cell at the
+                # filter's density: rare, as real ones are, and within
+                # what the third lowest sample is there to absorb.
+                if self.strays and (row * 7 + column * 3) % 41 == 0:
+                    found.append((x, y, self.ground(x, y) - 0.5 * FEET))
         return found
 
     def get_BoundingBox(self, view):
         corners = [self.transform.to_model(u, v, 0.0)
                    for u in (0.0, CLOUD_W) for v in (0.0, CLOUD_D)]
-        zs = [terrain(c[0], c[1]) for c in corners]
+        zs = [self.ground(c[0], c[1]) for c in corners]
+        tallest = max([0.0] + [o[4] for o in self.objects]) * FEET
+        zs = [min(zs) - 0.5 * FEET - 3.0 * FEET,
+              max(zs) + tallest + 3.0 * FEET]
         return FakeBox((min(c[0] for c in corners),
                         min(c[1] for c in corners), min(zs)),
                        (max(c[0] for c in corners),
@@ -545,8 +568,10 @@ class Recorder(object):
     pick, or to None to cancel that picker.
     """
 
-    def __init__(self, spacing=u"1", picks=None, confirm=True):
+    def __init__(self, spacing=u"1", picks=None, confirm=True, window=u"4"):
         self.spacing = spacing
+        self.window = window
+        self.prompts = []
         self.picks = picks or {}
         self.confirm = confirm
         self.alerts = []
@@ -555,6 +580,10 @@ class Recorder(object):
         self.pickers = []
 
     def ask_for_string(self, default=u"", prompt=u"", title=u"", **kwargs):
+        self.prompts.append(prompt)
+        if u"Largest object" in prompt:
+            self.pickers.append(u"window")
+            return self.window
         self.pickers.append(u"spacing")
         return self.spacing
 
@@ -1131,7 +1160,216 @@ check("thickness unreadable: no crash, no advice",
 
 
 # --------------------------------------------------------------------------
-# 13. An identity cloud
+# 13. The ground filter
+# --------------------------------------------------------------------------
+
+# Unit checks first.
+low = model.LowGrid(0.0, 0.0, 1.0)
+for z in (5.0, 1.0, 9.0, 2.0, 3.0):
+    low.add(0.5, 0.5, z)
+check("low grid: a cell yields its third lowest sample",
+      low.points() == [(0.5, 0.5, 3.0)], repr(low.points()))
+low = model.LowGrid(0.0, 0.0, 1.0)
+low.add(0.5, 0.5, 7.0)
+low.add(0.6, 0.5, 4.0)
+check("low grid: a sparse cell yields its highest sample",
+      low.points() == [(0.5, 0.5, 7.0)], repr(low.points()))
+check("low grid: samples are counted", low.samples == 2)
+
+
+def rough_cells(truck=True, hole=False):
+    """Slope, a 2 m step, an irregular edge, and a 3 x 8 cell truck."""
+    cells = {}
+    for i in range(30):
+        for j in range(20):
+            if (i - 15) ** 2 + (j - 10) ** 2 > 140:
+                continue
+            if hole and 3 <= i <= 6 and 8 <= j <= 11:
+                continue
+            z = 0.3 * i + 0.2 * j + (2.0 if i >= 20 else 0.0)
+            if truck and 10 <= i <= 12 and 5 <= j <= 12:
+                z += 3.5
+            cells[(i, j)] = (i + 0.5, j + 0.5, z)
+    return cells
+
+
+kept, removed = model.ground_filter(rough_cells(), 1.0, 5.0, 0.5)
+check("filter: the truck goes, all 24 cells of it",
+      sorted((int(p[0]), int(p[1])) for p in removed) ==
+      [(i, j) for i in range(10, 13) for j in range(5, 13)],
+      repr(sorted((int(p[0]), int(p[1])) for p in removed)))
+kept, removed = model.ground_filter(rough_cells(truck=False), 1.0, 5.0, 0.5)
+check("filter: a slope, a 2 m step and a ragged edge all stay",
+      removed == [], repr(removed[:5]))
+for flip_i, flip_j in ((True, False), (False, True), (True, True)):
+    mirrored = dict(((29 - i if flip_i else i, 19 - j if flip_j else j),
+                     (29 - i + 1.0 if flip_i else i + 0.5,
+                      19 - j + 1.0 if flip_j else j + 0.5, point[2]))
+                    for (i, j), point in rough_cells(truck=False).items())
+    kept, removed = model.ground_filter(mirrored, 1.0, 5.0, 0.5)
+    check(u"filter: the same site mirrored ({0}, {1}) loses no edge".format(
+        flip_i, flip_j), removed == [], repr(removed[:3]))
+kept, removed = model.ground_filter(rough_cells(truck=False, hole=True),
+                                    1.0, 5.0, 0.5)
+check("filter: the rim of a hole in the scan stays", removed == [],
+      repr(removed[:5]))
+kept, removed = model.ground_filter(rough_cells(), 1.0, 2.0, 0.5)
+check("filter: a window narrower than the truck leaves its middle in",
+      0 < len(removed) < 24, len(removed))
+check("filter: the window is at least as wide as asked",
+      (2 * model.window_cells(5.0, 1.0) + 1) * 1.0 >= 5.0 and
+      model.window_cells(5.0, 1.0) == 3)
+check("filter: a 30 cm bump stays, 70 cm goes",
+      model.ground_filter({(0, 0): (0, 0, 0.3), (1, 0): (1, 0, 0.0),
+                           (-1, 0): (-1, 0, 0.0)}, 1.0, 3.0, 0.5)[1] == []
+      and len(model.ground_filter({(0, 0): (0, 0, 0.7), (1, 0): (1, 0, 0.0),
+                                   (-1, 0): (-1, 0, 0.0)},
+                                  1.0, 3.0, 0.5)[1]) == 1)
+check("window: 4 m at 1 m spacing is fine",
+      model.window_error(4.0, 1.0) == u"")
+check("window: under the spacing is refused",
+      model.window_error(1.0, 2.0) != u"")
+check("window: 40 m is refused", model.window_error(40.0, 1.0) != u"")
+
+# Then the script, on a rough site: a sloping plane with a 1.5 m lava
+# step running across it, a truck, a shrub, and stray returns.
+STEP_X = 520.0 * FEET
+
+
+def lava(x, y):
+    return terrain(x, y) + (1.5 * FEET if x >= STEP_X else 0.0)
+
+
+# Two trucks parked side by side: 6 m by 8 m of roof.
+TRUCK = (505.0, 315.0, 511.0, 323.0, 3.5, True)
+SHRUB = (530.0, 310.0, 531.5, 311.5, 1.2, False)
+
+
+def site(**kwargs):
+    return FakePointCloudInstance(u"ELG_Scan", ground=lava,
+                                  objects=[TRUCK, SHRUB], strays=True,
+                                  **kwargs)
+
+
+def on_lava(made, tolerance=1e-6):
+    worst = 0.0
+    for x, y, z in made.given:
+        worst = max(worst, abs(z - lava(x, y)))
+    return worst <= tolerance, worst
+
+
+FILTER_PICK = {u"level": u"DA11.E01", u"scan": u"Ground filter"}
+
+_probe = site()
+_box = _probe.get_BoundingBox(None)
+_strays = {}
+for _x, _y, _z in _probe.model_points(FEET / 4.0):
+    if _z < lava(_x, _y) - 0.4 * FEET:
+        _key = (int(math.floor((_x - _box.Min.X) / FEET)),
+                int(math.floor((_y - _box.Min.Y) / FEET)))
+        _strays[_key] = _strays.get(_key, 0) + 1
+check("fake: stray returns land in many cells, never more than two to one",
+      len(_strays) > 50 and max(_strays.values()) <= 2,
+      u"{0} cells, most {1}".format(len(_strays), max(_strays.values())))
+
+doc = FakeDocument(clouds=[site()])
+cloud = doc.clouds[0]
+recorder = run_script(doc, Recorder(picks=FILTER_PICK, window=u"10"))
+made = survivor(doc)
+check("site, filter: built", made is not None, recorder.alerts)
+ok, worst = on_lava(made) if made else (False, None)
+check("site, filter: every point is on the ground, none on the truck, "
+      "the shrub or a stray", ok, repr(worst))
+covered = safely(covers_cloud, made, cloud, FEET) if made else (False,)
+check("site, filter: still reaches every side of the scan", covered[0],
+      repr(covered))
+upper = [p for p in made.given if STEP_X <= p[0] < STEP_X + FEET] \
+    if made else []
+check("site, filter: the top edge of the lava step is kept",
+      len(upper) >= 10, len(upper))
+check("site, filter: the cloud was read at a quarter of the spacing",
+      cloud.calls and abs(cloud.calls[0][0] - FEET / 4.0) < 1e-9,
+      repr(cloud.calls[:1]))
+check("site, filter: the confirmation says what was dropped",
+      recorder.questions and u"Ground filter:" in recorder.questions[0] and
+      u"largest object 10.0 m" in recorder.questions[0],
+      recorder.questions[:1])
+check("site, filter: a reasonable share dropped, no warning",
+      recorder.questions and u"more than a quarter" not in
+      recorder.questions[0])
+check("site, filter: the report names the method",
+      any(u"| Method | ground filter" in line for line in recorder.printed))
+check("site, filter: the prompt guides the size",
+      any(u"trucks" in p and u"people" in p and u"lava ridge" in p
+          for p in recorder.prompts))
+
+saved_tile = model.TILE_CELLS
+try:
+    # Smaller tiles, so the tile size is visible on a small fake site.
+    model.TILE_CELLS = 40
+    doc = FakeDocument(clouds=[site()])
+    recorder = run_script(doc, Recorder(picks=FILTER_PICK, window=u"10"))
+    box = doc.clouds[0].get_BoundingBox(None)
+    side = model.tile_side(FEET, model.FILTER_SAMPLES_PER_SPACING)
+    expected = len(model.tiles(box.Min.X, box.Min.Y, box.Max.X, box.Max.Y,
+                               side))
+    check("site, filter: tiles shrink with the denser reading, so a full "
+          "tile holds what it would at the averaging density",
+          len(doc.clouds[0].calls) == expected and expected > 4,
+          u"{0} calls, {1} expected".format(len(doc.clouds[0].calls),
+                                            expected))
+finally:
+    model.TILE_CELLS = saved_tile
+check("tiles: a full tile stays under the cap at either density",
+      all((model.tile_side(1.0, n) / model.average_distance(1.0, n)) ** 2
+          < model.MAX_POINTS_PER_CALL
+          for n in (model.SAMPLES_PER_SPACING,
+                    model.FILTER_SAMPLES_PER_SPACING)))
+
+doc = FakeDocument(clouds=[site()])
+recorder = run_script(doc, Recorder(picks=FILTER_PICK, window=u"2"))
+made = survivor(doc)
+on_roof = [p for p in made.given if p[2] - lava(p[0], p[1]) > 3.0 * FEET] \
+    if made else []
+check("site, 2 m window: the truck's middle stays, as documented",
+      len(on_roof) > 0, len(on_roof))
+
+doc = FakeDocument(clouds=[site()])
+recorder = run_script(doc, Recorder(picks={u"level": u"DA11.E01"}))
+made = survivor(doc)
+ok, worst = on_lava(made) if made else (True, None)
+check("site, averaged: objects end up in the surface", not ok, repr(worst))
+check("site, averaged: and the confirmation says so",
+      recorder.questions and u"All points averaged" in recorder.questions[0])
+
+saved_share = model.FILTER_WARN_SHARE
+try:
+    model.FILTER_WARN_SHARE = 0.0
+    doc = FakeDocument(clouds=[site()])
+    recorder = run_script(doc, Recorder(picks=FILTER_PICK, window=u"10"))
+    check("site, filter: dropping too much is warned about",
+          recorder.questions and u"more than a quarter" in
+          recorder.questions[0])
+finally:
+    model.FILTER_WARN_SHARE = saved_share
+
+for bad in (u"0,2", u"50", u"abc"):
+    doc = FakeDocument(clouds=[site()])
+    recorder = run_script(doc, Recorder(picks=FILTER_PICK, window=bad))
+    check(u"window {0!r}: refused before reading".format(bad),
+          not doc.clouds[0].calls and recorder.alerts, recorder.alerts)
+
+doc = FakeDocument(clouds=[site()])
+recorder = run_script(doc, Recorder(picks=FILTER_PICK, window=None))
+check("cancel window: nothing read", not doc.clouds[0].calls)
+
+doc = FakeDocument(clouds=[site()])
+recorder = run_script(doc, Recorder(picks={u"scan": None}))
+check("cancel method: nothing read", not doc.clouds[0].calls)
+
+
+# --------------------------------------------------------------------------
+# 14. An identity cloud
 # --------------------------------------------------------------------------
 
 flat = FakePointCloudInstance(u"ELG", returns="cloud",

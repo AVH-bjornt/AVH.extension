@@ -7,12 +7,23 @@ that spacing, and one point per occupied cell goes into
 `Toposolid.Create`, bounded by the rectangle through the outermost
 points.
 
-## It assumes a ground only cloud
+## Average, or filter for ground
 
 Revit hands a point back as X, Y, Z and a colour. The ground, vegetation
-and building classes a survey carries are not exposed, so this tool
-cannot tell a roof from a hillside. Every sample is averaged in. Give it
-a cloud cleaned down to ground first, in ReCap or by the surveyor.
+and building classes a survey carries are not exposed, so the tool
+cannot be told which points are ground. Each run asks how to treat the
+cloud:
+
+- **Average all points**, for a cloud already cleaned down to ground.
+- **Ground filter**, for a cloud that still holds people, vehicles and
+  plants. Each cell keeps its third lowest point, then a cell standing
+  more than 0.5 m above the ground around it, within a window the user
+  sizes to the largest object, is dropped and left for Revit to fill.
+  See `avh_topo.model.ground_filter` for what that gets wrong: a real
+  lump of ground narrower than the window is flattened too.
+
+A dedicated classifier (CloudCompare's CSF, or the surveyor's software)
+does this better. The filter is for when that has not been done.
 
 ## Two things are measured on every run, not assumed
 
@@ -197,6 +208,60 @@ def ask_spacing():
     return model.metres_to_feet(metres)
 
 
+AVERAGE = u"Average all points: the cloud is already cleaned down to ground"
+FILTER = (u"Ground filter: the cloud still has people, vehicles, plants "
+          u"or the like")
+
+WINDOW_PROMPT = (
+    u"Largest object to remove, in metres.\n\n"
+    u"Each point is compared with the ground around it, within a square "
+    u"this wide, and dropped if it stands more than 0.5 m above it. "
+    u"Revit fills the gap from the ground around.\n\n"
+    u"Guide:\n"
+    u"   2  people, shrubs, poles, signs\n"
+    u"   4  cars, vans, small machines\n"
+    u"  10  trucks, containers, site huts\n\n"
+    u"Bigger is not safer. Real ground narrower than this, such as a lava "
+    u"ridge, a boulder or the crest of a bank, is flattened too. Use the "
+    u"smallest size that covers the objects. Anything wider, such as a "
+    u"building, stays in.")
+
+
+def ask_method():
+    """True for the ground filter, False for averaging, None if cancelled."""
+    chosen = forms.SelectFromList.show(
+        [AVERAGE, FILTER], multiselect=False,
+        title=TITLE + u": what is in the scan?",
+        button_name=u"Use this")
+    if not chosen:
+        return None
+    if isinstance(chosen, list):
+        chosen = chosen[0] if chosen else None
+    chosen = to_text(chosen)
+    if chosen == FILTER:
+        return True
+    if chosen == AVERAGE:
+        return False
+    return None
+
+
+def ask_window(spacing_ft):
+    """The filter window in feet, or None when cancelled."""
+    answer = forms.ask_for_string(
+        default=u"{0:g}".format(model.WINDOW_DEFAULT_M),
+        prompt=WINDOW_PROMPT, title=TITLE)
+    if answer is None:
+        return None
+    try:
+        metres = parse_number(answer, u"The object size")
+    except ParseError as exc:
+        raise Abort(to_text(exc))
+    error = model.window_error(metres, model.feet_to_metres(spacing_ft))
+    if error:
+        raise Abort(error)
+    return model.metres_to_feet(metres)
+
+
 def transform_of(cloud):
     transform = None
     for name in ("GetTotalTransform", "GetTransform"):
@@ -289,12 +354,17 @@ def feed(reading, raw):
             add(x, y, z)
 
 
-def read_cloud(cloud, spacing_ft):
+def read_cloud(cloud, spacing_ft, filtering=False):
     transform = transform_of(cloud)
     box = box_of(cloud)
-    grid = model.Grid(box[0][0], box[0][1], spacing_ft)
+    if filtering:
+        samples = model.FILTER_SAMPLES_PER_SPACING
+        grid = model.LowGrid(box[0][0], box[0][1], spacing_ft)
+    else:
+        samples = model.SAMPLES_PER_SPACING
+        grid = model.Grid(box[0][0], box[0][1], spacing_ft)
     reading = Reading(grid, transform, box)
-    distance = model.average_distance(spacing_ft)
+    distance = model.average_distance(spacing_ft, samples)
 
     def visit(tile, depth):
         try:
@@ -314,7 +384,7 @@ def read_cloud(cloud, spacing_ft):
             reading.capped += 1
         feed(reading, raw)
 
-    side = spacing_ft * model.TILE_CELLS
+    side = model.tile_side(spacing_ft, samples)
     for tile in model.tiles(box[0][0], box[0][1], box[1][0], box[1][1],
                             side):
         visit(tile, 0)
@@ -366,7 +436,27 @@ def too_thin_advice(lowest, level, thickness):
                 format_metres(model.feet_to_metres(lowest + thickness), 2)))
 
 
-def confirmation(cloud, numbers, topo_type, level, reading, advice=u""):
+class Filtering(object):
+    """What the ground filter did, for the confirmation and the report."""
+
+    def __init__(self, window_ft, cells, removed):
+        self.window_ft = window_ft
+        self.cells = cells
+        self.removed = removed
+
+    def share(self):
+        return float(self.removed) / self.cells if self.cells else 0.0
+
+    def line(self):
+        return (u"Ground filter: {0} of {1} squares dropped as objects "
+                u"(largest object {2} m, more than 0.5 m above the ground "
+                u"around). Revit fills them in.".format(
+                    self.removed, self.cells,
+                    format_metres(model.feet_to_metres(self.window_ft), 1)))
+
+
+def confirmation(cloud, numbers, topo_type, level, reading, advice=u"",
+                 filtering=None):
     lines = [
         u"Build a toposolid from {0}?".format(element_label(cloud)),
         u"",
@@ -384,6 +474,16 @@ def confirmation(cloud, numbers, topo_type, level, reading, advice=u""):
         u"Where a corner has no ground under it, Revit fills in the "
         u"height.",
     ]
+    if filtering is not None:
+        lines += [u"", filtering.line()]
+        if filtering.share() > model.FILTER_WARN_SHARE:
+            lines += [u"That is more than a quarter of the site. The object "
+                      u"size may be larger than the terrain's own ridges "
+                      u"and bumps, which are being flattened with the "
+                      u"objects. A smaller size keeps more ground."]
+    else:
+        lines += [u"", u"All points averaged: anything standing on the "
+                       u"ground is part of the surface."]
     if advice:
         lines += [u"", advice]
     if numbers["count"] > model.WARN_POINTS:
@@ -548,7 +648,7 @@ def report_vertices(points, toposolid):
             format_metres(model.feet_to_metres(gaps["worst_at"][1]), 1)))
 
 
-def report(cloud, numbers, toposolid, mode, reading):
+def report(cloud, numbers, toposolid, mode, reading, filtering=None):
     output.print_md(u"### {0}".format(TITLE))
     output.print_md(u"| | |")
     output.print_md(u"| --- | --- |")
@@ -568,6 +668,12 @@ def report(cloud, numbers, toposolid, mode, reading):
     output.print_md(u"| Point heights read by Revit as | {0} |".format(
         u"relative to the level, and corrected" if mode == model.RELATIVE
         else u"absolute"))
+    output.print_md(u"| Method | {0} |".format(
+        u"all points averaged" if filtering is None else
+        u"ground filter, largest object {0} m, {1} of {2} squares "
+        u"dropped".format(
+            format_metres(model.feet_to_metres(filtering.window_ft), 1),
+            filtering.removed, filtering.cells)))
     if reading.capped:
         output.print_md(u"- {0} part(s) were sampled, not read in "
                         u"full.".format(reading.capped))
@@ -599,6 +705,19 @@ def run():
     if spacing_ft is None:
         return
 
+    filtering_on = ask_method()
+    if filtering_on is None:
+        return
+    window_ft = None
+    if filtering_on:
+        try:
+            window_ft = ask_window(spacing_ft)
+        except Abort as exc:
+            forms.alert(to_text(exc), title=TITLE)
+            return
+        if window_ft is None:
+            return
+
     types = collect(doc, DB.ToposolidType)
     if not types:
         forms.alert(u"This model has no toposolid types.", title=TITLE)
@@ -617,14 +736,20 @@ def run():
         return
 
     try:
-        reading = read_cloud(cloud, spacing_ft)
+        reading = read_cloud(cloud, spacing_ft, filtering_on)
     except Abort as exc:
         if getattr(exc, "reading", None) is not None:
             print_frame_problem(exc.reading)
         forms.alert(to_text(exc), title=TITLE)
         return
 
-    points = reading.grid.points()
+    filtering = None
+    if filtering_on:
+        cells = reading.grid.by_cell()
+        points, removed = model.ground_filter(cells, spacing_ft, window_ft)
+        filtering = Filtering(window_ft, len(cells), len(removed))
+    else:
+        points = reading.grid.points()
     corners = model.boundary(points)
     if corners is None:
         forms.alert(
@@ -638,7 +763,7 @@ def run():
     advice = too_thin_advice(min(p[2] for p in points), level, thickness)
 
     if not forms.alert(confirmation(cloud, numbers, topo_type, level,
-                                    reading, advice),
+                                    reading, advice, filtering),
                        title=TITLE, yes=True, no=True):
         return
 
@@ -673,7 +798,7 @@ def run():
                     u"({0}).".format(to_text(status)), title=TITLE)
         return
 
-    report(cloud, numbers, toposolid, mode, reading)
+    report(cloud, numbers, toposolid, mode, reading, filtering)
     report_vertices(points, toposolid)
 
 

@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.31.0.** The authoritative number is `__version__` in
+**Version 2.32.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -140,11 +140,25 @@ one point per occupied cell goes into a new toposolid, outlined by the
 rectangle through the outermost points. The count, extent and height
 range are shown before anything is built. Revit 2024 or newer.
 
-**It expects a cloud already cleaned down to ground**, in ReCap or by
-the surveyor. Revit does not expose the ground and vegetation classes a
-survey carries, so a building or a parked car in the cloud ends up in
-the terrain. Where the outline's corners have no ground under them,
-Revit fills in the height.
+Each run asks what is in the scan. **Average all points** is for a cloud
+already cleaned down to ground. **Ground filter** is for one that still
+has people, vehicles or plants: each square keeps its third lowest point
+instead of the average, and anything standing more than 0.5 m above the
+ground around it is dropped and filled in by Revit. You give the size of
+the largest object to remove, and the prompt carries a guide (2 m people
+and shrubs, 4 m cars, 10 m trucks and containers).
+
+The filter cannot tell an object from real ground of the same size. A
+lava ridge, boulder or crest narrower than the size you give is
+flattened along with the trucks, and anything wider, such as a building,
+stays in. Use the smallest size that covers the objects. Steps and
+steady slopes are kept. A proper classifier (CloudCompare's CSF plugin,
+or the surveyor's software) does this better when it is available.
+
+Revit does not expose the ground and vegetation classes a survey
+carries, which is why the tool has to work this out from heights alone.
+Where the outline's corners have no ground under them, Revit fills in
+the height.
 
 Two things the Revit API documentation leaves open are measured on every
 run instead of assumed: which coordinate system the points come back in,
@@ -278,7 +292,8 @@ does not.
 | 2.29.0 | Sync Scope Boxes: tick which boxes to copy or replace | Not yet run in Revit |
 | 2.30.0 | Tools panel: Point Cloud to Toposolid | Revit refused 1 000 000 points per read |
 | 2.30.1 | Point cloud read asks for 999 999 points at most | Read worked; too thin on the first level, 65 mm under the top on a lower one |
-| 2.31.0 | Toposolid kept within 0.5 m and compared vertex by vertex; too thin warned and caught | Current |
+| 2.31.0 | Toposolid kept within 0.5 m and compared vertex by vertex; too thin warned and caught | Not yet run in Revit |
+| 2.32.0 | Ground filter option for clouds with people, vehicles and plants | Current |
 
 ## Licence
 
