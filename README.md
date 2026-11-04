@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.30.1.** The authoritative number is `__version__` in
+**Version 2.31.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -149,7 +149,16 @@ Revit fills in the height.
 Two things the Revit API documentation leaves open are measured on every
 run instead of assumed: which coordinate system the points come back in,
 and whether Revit reads a toposolid point's height as absolute or
-relative to the level. If either cannot be settled, nothing is kept.
+relative to the level. If either is off by more than half a metre,
+nothing is kept. Afterwards the output window compares Revit's own
+vertices with the cloud points: how many it kept, and the worst and
+average height difference.
+
+**Pick a level low enough.** A toposolid has a flat bottom at its level
+less the type's thickness, and Revit refuses one whose ground goes below
+that as "too thin for its given type". The confirmation warns when that
+will happen and names the highest level that works; if Revit refuses
+anyway, the tool says so in plain words instead of Revit's error dialog.
 
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
@@ -268,7 +277,8 @@ does not.
 | 2.28.0 | Tools panel: Sync Scope Boxes | One yes or no for everything; all or nothing |
 | 2.29.0 | Sync Scope Boxes: tick which boxes to copy or replace | Not yet run in Revit |
 | 2.30.0 | Tools panel: Point Cloud to Toposolid | Revit refused 1 000 000 points per read |
-| 2.30.1 | Point cloud read asks for 999 999 points at most | Current |
+| 2.30.1 | Point cloud read asks for 999 999 points at most | Read worked; too thin on the first level, 65 mm under the top on a lower one |
+| 2.31.0 | Toposolid kept within 0.5 m and compared vertex by vertex; too thin warned and caught | Current |
 
 ## Licence
 

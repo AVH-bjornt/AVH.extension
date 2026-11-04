@@ -28,7 +28,17 @@ plausible wrong place. So:
 2. After the toposolid is built its top is compared with the highest
    point given. If it sits one level elevation too high, the points were
    read as relative: it is rebuilt with that subtracted and checked
-   again. Any other disagreement rolls everything back.
+   again. A disagreement over half a metre rolls everything back; that
+   check is for errors of metres. How closely Revit's own vertices follow
+   the cloud is printed afterwards, point by point.
+
+## Too thin for its type
+
+Revit refuses a toposolid whose points go below its flat bottom, taken
+here as the level less the type's thickness (a reading of one live run,
+not a documented rule). The confirmation warns when the lowest point is
+under it and says which level would do, and the refusal is caught and
+explained instead of ending in Revit's error dialog.
 
 ## Unverified
 
@@ -326,7 +336,37 @@ def print_frame_problem(reading):
     output.print_md(u"```")
 
 
-def confirmation(cloud, numbers, topo_type, level, reading):
+def type_thickness(topo_type):
+    """The type's total thickness in feet, or None when unreadable."""
+    try:
+        structure = topo_type.GetCompoundStructure()
+        if structure is None:
+            return None
+        return structure.GetWidth()
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return None
+
+
+def too_thin_advice(lowest, level, thickness):
+    """Why this level is too high for the ground, or u"" when it is not."""
+    if thickness is None:
+        return u""
+    under = model.below_bottom(lowest, level.Elevation, thickness)
+    if under <= 0.0:
+        return u""
+    return (u"The lowest point is {0} m under the bottom of this toposolid "
+            u"({1} m: the level less the type's {2} m thickness). Revit "
+            u"refuses that as too thin for its type. Pick a level at or "
+            u"below {3} m.".format(
+                format_metres(model.feet_to_metres(under), 2),
+                format_metres(model.feet_to_metres(
+                    level.Elevation - thickness), 2),
+                format_metres(model.feet_to_metres(thickness), 2),
+                format_metres(model.feet_to_metres(lowest + thickness), 2)))
+
+
+def confirmation(cloud, numbers, topo_type, level, reading, advice=u""):
     lines = [
         u"Build a toposolid from {0}?".format(element_label(cloud)),
         u"",
@@ -344,6 +384,8 @@ def confirmation(cloud, numbers, topo_type, level, reading):
         u"Where a corner has no ground under it, Revit fills in the "
         u"height.",
     ]
+    if advice:
+        lines += [u"", advice]
     if numbers["count"] > model.WARN_POINTS:
         lines += [u"",
                   u"That is a lot of points for a toposolid. It may be "
@@ -386,7 +428,7 @@ def top_of(doc, toposolid):
     return box.Max.Z
 
 
-def build_checked(doc, points, corners, type_id, level):
+def build_checked(doc, points, corners, type_id, level, advice=u""):
     """Build it and check its top. Returns (toposolid, how Z was read).
 
     Raises Abort when the result cannot be trusted. The caller rolls
@@ -426,7 +468,84 @@ def build_checked(doc, points, corners, type_id, level):
             format_metres(model.feet_to_metres(highest)),
             u"unreadable" if top is None else
             format_metres(model.feet_to_metres(top)),
-            format_metres(model.feet_to_metres(level.Elevation))))
+            format_metres(model.feet_to_metres(level.Elevation)))
+        + (u"\n\n" + advice if advice else u""))
+
+
+def vertices_of(toposolid):
+    """Revit's own vertices of the top face, as (x, y, z), or []."""
+    found = []
+    try:
+        editor = toposolid.GetSlabShapeEditor()
+        for vertex in editor.SlabShapeVertices:
+            position = vertex.Position
+            found.append((position.X, position.Y, position.Z))
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return []
+    return found
+
+
+class FailureCatcher(DB.IFailuresPreprocessor):
+    """Turns "too thin for its given type" into a rollback and a count.
+
+    Without it, Revit stops the run with its own error dialog, which
+    names the element but not the numbers behind it. Every other failure
+    is left to Revit as before.
+    """
+
+    def __init__(self):
+        self.too_thin = 0
+
+    def PreprocessFailures(self, accessor):
+        try:
+            target = (DB.BuiltInFailures.SlabShapeFailures
+                      .SlabShapeFailedTooThin)
+            for message in accessor.GetFailureMessages():
+                found = message.GetFailureDefinitionId()
+                if found.Guid == target.Guid:
+                    self.too_thin += 1
+        except BaseException as exc:
+            logger.debug(to_text(exc))
+        if self.too_thin:
+            return DB.FailureProcessingResult.ProceedWithRollBack
+        return DB.FailureProcessingResult.Continue
+
+
+def attach(transaction, catcher):
+    """Hand the catcher to the transaction. False when Revit would not."""
+    try:
+        options = transaction.GetFailureHandlingOptions()
+        options.SetFailuresPreprocessor(catcher)
+        transaction.SetFailureHandlingOptions(options)
+        return True
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return False
+
+
+def report_vertices(points, toposolid):
+    gaps = model.vertex_gaps(points, vertices_of(toposolid))
+    if gaps is None:
+        output.print_md(u"- Revit's vertices could not be read, so the "
+                        u"surface was not compared with the cloud.")
+        return
+    output.print_md(u"#### The surface against the cloud")
+    output.print_md(u"| | |")
+    output.print_md(u"| --- | --- |")
+    output.print_md(u"| Points kept as vertices | {0} of {1} |".format(
+        gaps["matched"], len(points)))
+    output.print_md(u"| Points with no vertex | {0} |".format(
+        gaps["missing"]))
+    output.print_md(u"| Vertices with no point | {0} |".format(gaps["extra"]))
+    output.print_md(u"| Height difference, worst | {0} mm |".format(
+        format_metres(model.feet_to_metres(gaps["worst"]) * 1000.0, 0)))
+    output.print_md(u"| Height difference, average | {0} mm |".format(
+        format_metres(model.feet_to_metres(gaps["mean"]) * 1000.0, 0)))
+    if gaps["worst_at"] is not None:
+        output.print_md(u"| Worst at (internal, m) | X {0}, Y {1} |".format(
+            format_metres(model.feet_to_metres(gaps["worst_at"][0]), 1),
+            format_metres(model.feet_to_metres(gaps["worst_at"][1]), 1)))
 
 
 def report(cloud, numbers, toposolid, mode, reading):
@@ -515,16 +634,21 @@ def run():
         return
     numbers = model.summary(points, spacing_ft)
 
+    thickness = type_thickness(topo_type)
+    advice = too_thin_advice(min(p[2] for p in points), level, thickness)
+
     if not forms.alert(confirmation(cloud, numbers, topo_type, level,
-                                    reading),
+                                    reading, advice),
                        title=TITLE, yes=True, no=True):
         return
 
     transaction = DB.Transaction(doc, TITLE)
+    catcher = FailureCatcher()
+    attach(transaction, catcher)
     transaction.Start()
     try:
         toposolid, mode = build_checked(doc, points, corners, topo_type.Id,
-                                        level)
+                                        level, advice)
     except Abort as exc:
         transaction.RollBack()
         forms.alert(to_text(exc), title=TITLE)
@@ -538,11 +662,19 @@ def run():
 
     status = transaction.Commit()
     if status != DB.TransactionStatus.Committed:
+        if catcher.too_thin:
+            forms.alert(
+                u"Revit refused the toposolid as too thin for its type, so "
+                u"nothing was built.\n\n{0}".format(
+                    advice or u"The points are lower than this type allows "
+                    u"on this level. Try a lower level."), title=TITLE)
+            return
         forms.alert(u"Revit rejected the toposolid, so nothing was built "
                     u"({0}).".format(to_text(status)), title=TITLE)
         return
 
     report(cloud, numbers, toposolid, mode, reading)
+    report_vertices(points, toposolid)
 
 
 if __name__ == "__main__":

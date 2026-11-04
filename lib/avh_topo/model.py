@@ -60,7 +60,18 @@ FRAME_SHARE = 0.9
 FRAME_TOLERANCE_FT = 1.0 / METRES_PER_FOOT
 
 # How close the built toposolid's top has to be to the highest point.
-Z_TOLERANCE_FT = 0.01 / METRES_PER_FOOT
+#
+# This check is there to catch errors of metres: points read in the wrong
+# frame, or heights read relative to a level 26 m down. It is not a
+# survey tolerance. The first toposolid Revit built (2026-11-04) had its
+# top 65 mm under the highest point given, and a 10 mm tolerance threw
+# it away. How far Revit's own vertices sit from the cloud is reported
+# separately, by `vertex_gaps`, rather than judged here.
+Z_TOLERANCE_FT = 0.5 / METRES_PER_FOOT
+
+# A toposolid vertex and a given point are the same point when they sit
+# within this of each other in plan.
+VERTEX_MATCH_FT = 0.001 / METRES_PER_FOOT
 
 ABSOLUTE = u"absolute"
 RELATIVE = u"relative"
@@ -273,17 +284,94 @@ def z_mode(highest_given, built_top, level_elevation,
            tolerance=Z_TOLERANCE_FT):
     """How Revit read the Z of the points it was given.
 
-    ABSOLUTE when the built top matches the highest point given, RELATIVE
-    when it matches that plus the level's elevation, None when neither.
-    On a level at zero both readings agree and ABSOLUTE is returned.
+    ABSOLUTE when the built top is nearer the highest point given, RELATIVE
+    when it is nearer that plus the level's elevation, None when it is
+    within `tolerance` of neither. On a level near zero the two readings
+    nearly agree and the nearer wins, which is right to within the
+    level's elevation either way.
     """
     if built_top is None:
         return None
-    if abs(built_top - highest_given) <= tolerance:
+    off_absolute = abs(built_top - highest_given)
+    off_relative = abs(built_top - (highest_given + level_elevation))
+    if min(off_absolute, off_relative) > tolerance:
+        return None
+    if off_absolute <= off_relative:
         return ABSOLUTE
-    if abs(built_top - (highest_given + level_elevation)) <= tolerance:
-        return RELATIVE
-    return None
+    return RELATIVE
+
+
+def below_bottom(lowest, level_elevation, thickness):
+    """How far the lowest point sits under the toposolid's flat bottom.
+
+    0.0 when it does not. The bottom is taken to be the level's elevation
+    less the type's thickness. That is a reading of one live run, not a
+    documented rule: on its first level the build failed with "too thin
+    for its given type", and on a level 26 m lower it built.
+    """
+    bottom = level_elevation - thickness
+    return max(0.0, bottom - lowest)
+
+
+def vertex_gaps(points, vertices, match=VERTEX_MATCH_FT):
+    """How Revit's vertices compare with the points it was given.
+
+    Pairs each point with a vertex at the same place in plan, then
+    reports the height differences. None when there are no vertices.
+
+    Returns a dict: `matched` points that have a vertex, `missing` points
+    that do not, `extra` vertices that match no point (the outline's
+    corners at least), `worst` and `mean` absolute height difference in
+    feet over the matched ones, and `worst_at`, the point where the worst
+    one is.
+    """
+    if not vertices:
+        return None
+    cells = {}
+    for vertex in vertices:
+        key = (int(math.floor(vertex[0] / match)),
+               int(math.floor(vertex[1] / match)))
+        cells.setdefault(key, []).append(vertex)
+
+    used = set()
+    gaps = []
+    worst = 0.0
+    worst_at = None
+    missing = 0
+    for point in points:
+        kx = int(math.floor(point[0] / match))
+        ky = int(math.floor(point[1] / match))
+        found = None
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for vertex in cells.get((kx + dx, ky + dy), ()):
+                    if id(vertex) in used:
+                        continue
+                    if (abs(vertex[0] - point[0]) <= match and
+                            abs(vertex[1] - point[1]) <= match):
+                        found = vertex
+                        break
+                if found is not None:
+                    break
+            if found is not None:
+                break
+        if found is None:
+            missing += 1
+            continue
+        used.add(id(found))
+        gap = abs(found[2] - point[2])
+        gaps.append(gap)
+        if gap >= worst:
+            worst = gap
+            worst_at = point
+    return {
+        "matched": len(gaps),
+        "missing": missing,
+        "extra": len(vertices) - len(used),
+        "worst": worst,
+        "mean": sum(gaps) / len(gaps) if gaps else 0.0,
+        "worst_at": worst_at,
+    }
 
 
 def summary(points, spacing_ft):

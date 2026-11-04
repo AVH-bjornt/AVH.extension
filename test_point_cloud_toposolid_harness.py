@@ -245,13 +245,20 @@ class FakeParameter(object):
 class FakeToposolidType(object):
     """ElementType.Name can raise on IronPython. This one always does."""
 
-    def __init__(self, name):
+    def __init__(self, name, thickness_m=1.0, structure=True):
         self.label = name
         self.Id = new_id()
+        self.thickness = thickness_m * FEET
+        self.structure = structure
 
     @property
     def Name(self):
         raise AttributeError("Name")
+
+    def GetCompoundStructure(self):
+        if not self.structure:
+            raise Exception("no structure")
+        return Namespace(GetWidth=lambda: self.thickness)
 
     def get_Parameter(self, which):
         if which == "SYMBOL_NAME_PARAM":
@@ -304,6 +311,20 @@ class FakeToposolid(object):
         lift = level.Elevation if doc.z_relative else 0.0
         lift += doc.z_junk
         self.points = [(p[0], p[1], p[2] + lift) for p in points]
+        # Revit's surface does not pass exactly through every point: on
+        # the first live build its top sat 65 mm under the highest point
+        # given. `top_sag` lowers the highest vertex by that much.
+        if doc.top_sag and self.points:
+            high = max(range(len(self.points)),
+                       key=lambda i: self.points[i][2])
+            x, y, z = self.points[high]
+            self.points[high] = (x, y, z - doc.top_sag)
+
+    def GetSlabShapeEditor(self):
+        if self.doc.vertices_raise:
+            raise Exception("no shape editor")
+        return Namespace(SlabShapeVertices=[
+            Namespace(Position=FakeXYZ(*p)) for p in self.points])
 
     def get_BoundingBox(self, view):
         if not self.regenerated:
@@ -360,7 +381,8 @@ class FakeToposolidClass(object):
 class FakeDocument(object):
     def __init__(self, clouds=None, types_=None, levels=None,
                  z_relative=False, z_junk=0.0, create_raises=False,
-                 commit_status="Committed"):
+                 commit_status="Committed", top_sag=0.0,
+                 vertices_raise=False):
         self.clouds = list(clouds if clouds is not None else
                            [FakePointCloudInstance(u"ELG_Site_Ground")])
         self.types = list(types_ if types_ is not None else
@@ -372,6 +394,9 @@ class FakeDocument(object):
                             FakeLevel(u"DA11.E03", 8.0)])
         self.z_relative = z_relative
         self.z_junk = z_junk
+        self.top_sag = top_sag
+        self.vertices_raise = vertices_raise
+        self.dialogs = []
         self.create_raises = create_raises
         self.commit_status = commit_status
         self.toposolids = []
@@ -419,12 +444,66 @@ class FakeCollector(object):
         return iter([])
 
 
+class FakeFailureId(object):
+    def __init__(self, guid):
+        self.Guid = guid
+
+
+TOO_THIN = FakeFailureId("guid-too-thin")
+OTHER_FAILURE = FakeFailureId("guid-other")
+
+
+class FakeFailureMessage(object):
+    def __init__(self, failure_id):
+        self.failure_id = failure_id
+
+    def GetFailureDefinitionId(self):
+        # A fresh object each time, as Revit hands back: compare by Guid.
+        return FakeFailureId(self.failure_id.Guid)
+
+
+class FakeFailuresAccessor(object):
+    def __init__(self, messages):
+        self.messages = messages
+
+    def GetFailureMessages(self):
+        return list(self.messages)
+
+
+class FakeFailureOptions(object):
+    def __init__(self):
+        self.preprocessor = None
+
+    def SetFailuresPreprocessor(self, preprocessor):
+        self.preprocessor = preprocessor
+
+
 class FakeTransaction(object):
     log = []
 
     def __init__(self, doc, name):
         self.doc = doc
         self.state = None
+        self.options = FakeFailureOptions()
+
+    def GetFailureHandlingOptions(self):
+        return self.options
+
+    def SetFailureHandlingOptions(self, options):
+        self.options = options
+
+    def failures(self):
+        """Too thin, the way the first live run met it: a point under the
+        level less the type's thickness. Posted at commit."""
+        found = []
+        for made in self.doc.toposolids:
+            kind = [t for t in self.doc.types if t.Id is made.type_id]
+            if not kind:
+                continue
+            bottom = made.level.Elevation - kind[0].thickness
+            if min(p[2] for p in made.points) < bottom - 1e-9:
+                found.append(FakeFailureMessage(TOO_THIN))
+        return found
 
     def Start(self):
         self.state = self.doc.snapshot()
@@ -436,6 +515,18 @@ class FakeTransaction(object):
 
     def Commit(self):
         FakeTransaction.log.append("commit")
+        messages = self.failures()
+        if messages:
+            catcher = self.options.preprocessor
+            result = None
+            if catcher is not None:
+                result = catcher.PreprocessFailures(
+                    FakeFailuresAccessor(messages))
+            if result != "ProceedWithRollBack":
+                # Revit's own dialog; the user can only cancel.
+                self.doc.dialogs.append("too thin")
+            self.doc.restore(self.state)
+            return "RolledBack"
         if self.doc.commit_status != "Committed":
             self.doc.restore(self.state)
         return self.doc.commit_status
@@ -511,6 +602,11 @@ def run_script(doc, recorder=None, revit_2023=False):
         Transaction=FakeTransaction,
         TransactionStatus=Namespace(Committed="Committed"),
         BuiltInParameter=Namespace(SYMBOL_NAME_PARAM="SYMBOL_NAME_PARAM"),
+        IFailuresPreprocessor=object,
+        BuiltInFailures=Namespace(SlabShapeFailures=Namespace(
+            SlabShapeFailedTooThin=TOO_THIN)),
+        FailureProcessingResult=Namespace(
+            Continue="Continue", ProceedWithRollBack="ProceedWithRollBack"),
     )
     if not revit_2023:
         db.Toposolid = FakeToposolidClass
@@ -950,7 +1046,92 @@ check("rejected commit: not reported as success",
 
 
 # --------------------------------------------------------------------------
-# 11. An identity cloud
+# 11. Revit's surface sags under the highest point, as it did live
+# --------------------------------------------------------------------------
+
+SAG = 0.065 * FEET
+doc = FakeDocument(top_sag=SAG)
+recorder = run_script(doc, Recorder(picks={u"level": u"DA11.E01"}))
+made = survivor(doc)
+check("sag: a 65 mm sag is kept, not rolled back", made is not None,
+      recorder.alerts)
+check("sag: committed", FakeTransaction.log == ["start", "commit"],
+      FakeTransaction.log)
+check("sag: the report shows the worst gap as 65 mm",
+      u"| Height difference, worst | 65 mm |" in recorder.printed,
+      [line for line in recorder.printed if u"worst" in line])
+check("sag: every point is matched to a vertex",
+      made is not None and u"| Points kept as vertices | {0} of {0} |".format(
+          len(made.given)) in recorder.printed)
+
+doc = FakeDocument()
+recorder = run_script(doc, Recorder(picks={u"level": u"DA11.E01"}))
+check("no sag: the worst gap is 0 mm",
+      u"| Height difference, worst | 0 mm |" in recorder.printed)
+
+doc = FakeDocument(vertices_raise=True)
+recorder = run_script(doc, Recorder(picks={u"level": u"DA11.E01"}))
+check("vertices unreadable: still kept, and said so",
+      survivor(doc) is not None and
+      any(u"could not be read" in line for line in recorder.printed))
+
+
+# --------------------------------------------------------------------------
+# 12. Too thin for its type
+# --------------------------------------------------------------------------
+
+high_levels = [FakeLevel(u"DA11.ROOF", 100.0), FakeLevel(u"DA11.E01", 0.0)]
+doc = FakeDocument(levels=high_levels)
+recorder = run_script(doc, Recorder(picks={u"level": u"ROOF",
+                                           u"type": u"Generic"}))
+check("too thin: the confirmation warns",
+      recorder.questions and u"too thin" in recorder.questions[0],
+      recorder.questions[:1])
+check("too thin: and names a level low enough",
+      recorder.questions and u"at or below" in recorder.questions[0])
+check("too thin: nothing kept", not doc.toposolids)
+check("too thin: Revit's dialog never shown", not doc.dialogs, doc.dialogs)
+check("too thin: the user is told why",
+      any(u"too thin for its type" in alert for alert in recorder.alerts),
+      recorder.alerts)
+check("too thin: no success report",
+      not any(u"Samples read" in line for line in recorder.printed))
+
+doc = FakeDocument()
+recorder = run_script(doc, Recorder(picks={u"level": u"DA11.E01"}))
+check("thick enough: no too thin warning",
+      recorder.questions and u"too thin" not in recorder.questions[0])
+
+# The advice must be right, not just present: build on the level it names.
+doc = FakeDocument(levels=[FakeLevel(u"DA11.ROOF", 100.0)])
+recorder = run_script(doc, Recorder(picks={u"type": u"Generic"}))
+advised = None
+if recorder.questions:
+    tail = recorder.questions[0].split(u"at or below ")
+    if len(tail) > 1:
+        advised = float(tail[1].split(u" m")[0])
+check("too thin: the advised level is the lowest point plus the thickness",
+      advised is not None and abs(advised - (
+          model.feet_to_metres(min(p[2] for p in
+                                   doc.clouds[0].model_points(FEET / 2.0)
+                                   )) + 1.0)) < 0.3,
+      repr(advised))
+if advised is not None:
+    doc = FakeDocument(levels=[FakeLevel(u"ADVISED", advised - 0.01)])
+    recorder = run_script(doc, Recorder(picks={u"type": u"Generic"}))
+    check("too thin: a level just under the advice builds",
+          survivor(doc) is not None, recorder.alerts)
+
+thin = FakeDocument(levels=high_levels,
+                    types_=[FakeToposolidType(u"Odd", structure=False)])
+recorder = run_script(thin, Recorder(picks={u"level": u"ROOF"}))
+check("thickness unreadable: no crash, no advice",
+      recorder.questions and u"too thin" not in recorder.questions[0],
+      recorder.alerts)
+
+
+# --------------------------------------------------------------------------
+# 13. An identity cloud
 # --------------------------------------------------------------------------
 
 flat = FakePointCloudInstance(u"ELG", returns="cloud",
