@@ -17,9 +17,11 @@ documentation is silent it lies both ways, in separate scenarios:
 - Toposolid.Create reads Z as absolute in one scenario and relative to
   the level in another.
 - A new toposolid has no bounding box until the document regenerates.
-- GetPoints refuses more than 1 000 000 points and, past the number
-  asked for, returns the first ones in scan order: a dense tile read
-  without splitting covers a strip of itself, not the whole.
+- GetPoints refuses 1 000 000 points or more. The documentation says
+  "from 1 to 1000000", but Revit refused exactly 1 000 000 on the first
+  live run, and this fake allowed it, which is how that shipped. Past
+  the number asked for, it returns the first ones in scan order: a dense
+  tile read without splitting covers a strip of itself, not the whole.
 - A toposolid type's Name raises, as ElementType.Name can on IronPython.
 
 Run outside Revit:
@@ -171,7 +173,8 @@ class FakePointCloudInstance(object):
     "model", or "nowhere" (10 km off, fitting neither reading).
     """
 
-    REAL_CAP = 1000000
+    # Refused from here up. Observed in Revit, not read in the docs.
+    REFUSED_FROM = 1000000
 
     def __init__(self, name, returns="cloud", transform=None, raises=False,
                  empty=False):
@@ -208,7 +211,7 @@ class FakePointCloudInstance(object):
 
     def GetPoints(self, cloud_filter, average_distance, count):
         self.calls.append((average_distance, count))
-        if count < 1 or count > self.REAL_CAP:
+        if count < 1 or count >= self.REFUSED_FROM:
             raise ValueError("The number of points read must range from 1 "
                              "to 1000000.")
         if self.raises:
@@ -706,7 +709,7 @@ check("run: GetPoints was asked at half the spacing",
       cloud.calls and all(abs(call[0] - FEET / 2.0) < 1e-9
                           for call in cloud.calls), repr(cloud.calls[:2]))
 check("run: and never for more than the cap",
-      all(call[1] <= 1000000 for call in cloud.calls))
+      all(call[1] < 1000000 for call in cloud.calls))
 check("run: the confirmation gives the point count",
       recorder.questions and
       u"{0} points".format(len(made.given) if made else -1)

@@ -26,9 +26,12 @@ import math
 
 METRES_PER_FOOT = 0.3048
 
-# GetPoints refuses more than this per call (documented: "The number of
-# points read must range from 1 to 1000000").
-MAX_POINTS_PER_CALL = 1000000
+# The most GetPoints is asked for per call. The documentation says "The
+# number of points read must range from 1 to 1000000", and Revit refused
+# exactly 1000000 with that same message on the first live run
+# (2026-11-04). The upper bound is exclusive in practice, whatever the
+# sentence says.
+MAX_POINTS_PER_CALL = 999999
 
 # averageDistance is asked for at half the grid spacing, so a fully
 # covered cell is fed about four samples. More only costs time in

@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.30.0.** The authoritative number is `__version__` in
+**Version 2.30.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -267,7 +267,8 @@ does not.
 | 2.27.0 | Asked and reported northing first, to match Revit; the model's own origin is shown | Confirmed: lands on the survey point |
 | 2.28.0 | Tools panel: Sync Scope Boxes | One yes or no for everything; all or nothing |
 | 2.29.0 | Sync Scope Boxes: tick which boxes to copy or replace | Not yet run in Revit |
-| 2.30.0 | Tools panel: Point Cloud to Toposolid | Current |
+| 2.30.0 | Tools panel: Point Cloud to Toposolid | Revit refused 1 000 000 points per read |
+| 2.30.1 | Point cloud read asks for 999 999 points at most | Current |
 
 ## Licence
 

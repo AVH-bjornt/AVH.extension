@@ -292,8 +292,9 @@ def read_cloud(cloud, spacing_ft):
         except Abort:
             raise
         except BaseException as exc:
-            raise Abort(u"Revit would not read the point cloud: "
-                        u"{0}".format(to_text(exc)))
+            raise Abort(u"Revit would not read the point cloud, asked "
+                        u"for at most {0} points: {1}".format(
+                            model.MAX_POINTS_PER_CALL, to_text(exc)))
         reading.tiles_read += 1
         if len(raw) >= model.MAX_POINTS_PER_CALL:
             if depth < model.MAX_SPLITS:
