@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.29.0.** The authoritative number is `__version__` in
+**Version 2.30.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -133,6 +133,24 @@ deleted and the new one renamed. The replacement has a new element id.
 Boxes that have disappeared from the link are reported and left in
 place. Copies go on `Shared Views, Levels, Grids` when the model has it.
 
+**Point Cloud to Toposolid.** Pick a linked point cloud, a point
+spacing in metres, a toposolid type and a level. The cloud is read in
+tiles, every sample is averaged into a square grid at that spacing, and
+one point per occupied cell goes into a new toposolid, outlined by the
+rectangle through the outermost points. The count, extent and height
+range are shown before anything is built. Revit 2024 or newer.
+
+**It expects a cloud already cleaned down to ground**, in ReCap or by
+the surveyor. Revit does not expose the ground and vegetation classes a
+survey carries, so a building or a parked car in the cloud ends up in
+the terrain. Where the outline's corners have no ground under them,
+Revit fills in the height.
+
+Two things the Revit API documentation leaves open are measured on every
+run instead of assumed: which coordinate system the points come back in,
+and whether Revit reads a toposolid point's height as absolute or
+relative to the level. If either cannot be settled, nothing is kept.
+
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
 design option, category or subcategory hidden, explicitly hidden, a view
@@ -248,7 +266,8 @@ does not.
 | 2.26.2 | The document is regenerated before a new element's position is read | Worked |
 | 2.27.0 | Asked and reported northing first, to match Revit; the model's own origin is shown | Confirmed: lands on the survey point |
 | 2.28.0 | Tools panel: Sync Scope Boxes | One yes or no for everything; all or nothing |
-| 2.29.0 | Sync Scope Boxes: tick which boxes to copy or replace | Current |
+| 2.29.0 | Sync Scope Boxes: tick which boxes to copy or replace | Not yet run in Revit |
+| 2.30.0 | Tools panel: Point Cloud to Toposolid | Current |
 
 ## Licence
 
