@@ -1,48 +1,35 @@
 # -*- coding: utf-8 -*-
-"""Check every stair in the model against Byggingarreglugerd 112/2012.
+"""Rise and going of every stair, against the rules for its use.
 
-Reads each stair, its flights, landings, type and railings, measures
-the headroom over every tread, and reports per stair what passes, what
-fails, and what the model cannot answer, with the article for each.
-The rules themselves live in `avh_stairs.rules` and are tested without
-Revit.
+Reads each stair's riser, going and nosing and checks them against
+Byggingarregluger\u00f0 112/2012, 6.4.9 and 6.4.10, or, for a stair
+marked To_Machinery, against IST EN ISO 14122 (part 1 for which kind of
+access the pitch makes it, part 3 for stairs and step ladders, part 4
+for fixed ladders). Nothing else about the stair is checked: not width,
+landings, headroom or railings.
 
-## The stair's use decides the limits
+The rules live in `avh_stairs.rules` and are tested without Revit.
 
-A stair inside a dwelling, one serving several companies and outdoor
-steps have different limits, and Revit knows none of that. Each stair
-carries its use in the text parameter AVH_Stair_Use. If the model has no
-such parameter the tool offers to add it, and if stairs have no value it
-offers to set them from a list before checking. Stairs left without one
-get only the rules that hold for every stair.
+## The stair's use decides the rules
 
-## Headroom
-
-Rays are cast straight up from just above the middle of every tread, at
-the centre of the flight and near both sides, in a 3D view made for the
-purpose and thrown away afterwards. Linked models are included, since a
-structural slab edge is the usual culprit. The stair's own railings are
-left out; its own upper flights are not, since those are exactly what a
-low headroom is usually made of.
+Each stair carries its use in the text parameter AVH_Stair_Use:
+almennur, annar, uti or To_Machinery. The codes used by Stair Check
+2.33 (ibud, fyrirtaeki, uti_adal and the rest) are still read. If the
+model has no such parameter the tool offers to add it, and stairs
+without a value can be set from a list before the check runs.
 
 ## Unverified
 
-Not yet run in Revit. Every API member below is read defensively and a
-value that cannot be read is reported as "not checked", never as a
-pass: `Stairs.ActualRiserHeight`, `ActualTreadDepth`, `GetStairsRuns`,
-`GetStairsLandings`, `GetAssociatedRailings`; `StairsRun.ActualRunWidth`,
-`StairsRunStyle`, `GetStairsPath`, `ActualTreadsNumber`;
-`StairsLanding.GetFootprintBoundary`; `StairsRunType.HasRisers`,
-`NosingLength`, `TreadThickness`; `RailingType.TopRailHeight`,
-`PrimaryHandrailHeight`, `SecondaryHandrailHeight`; `ReferenceIntersector`
-with `FindReferencesInRevitLinks`; and the shared parameter binding.
+Confirmed in Revit (2.33.1): ActualRiserHeight, ActualTreadDepth,
+GetStairsRuns, run elevations, StairsRunType.NosingLength, and
+IsInEditMode being a method. Not yet confirmed: StairsRun
+ActualRisersNumber, used to compare the riser of each flight.
 """
 
-__title__ = "Stair\nCheck"
 __author__ = "AVH"
-__doc__ = ("Check every stair in the model against Byggingarreglugerd "
-           "112/2012: riser, going, slope, landings, width, headroom and "
-           "railings, with the article for each result.")
+__doc__ = ("Check the rise and going of every stair: Byggingarreglugerd "
+           "6.4.9 and 6.4.10, or IST EN ISO 14122 for stairs set to "
+           "To_Machinery.")
 
 import os
 import sys
@@ -65,23 +52,12 @@ from avh_schedules.compat import to_text          # noqa: E402
 output = script.get_output()
 logger = script.get_logger()
 
-TITLE = u"Stair Check"
+TITLE = u"G\u00f6nguhlutfall stiga"
 METRES_PER_FOOT = 0.3048
 
 # A fixed GUID, so the parameter is the same shared parameter in every
-# model it is added to.
+# model it is added to. Unchanged from Stair Check 2.33.
 PARAMETER_GUID = "f03e1b0f-96ae-4317-ba74-010f759f77eb"
-
-# Rays start this far above the tread, and this far in from each side.
-RAY_LIFT_M = 0.05
-RAY_EDGE_M = 0.15
-
-STATUS_LABEL = {
-    rules.FAIL: u"**FAIL**",
-    rules.CHECK: u"CHECK",
-    rules.PASS: u"pass",
-    rules.NOT_CHECKED: u"not checked",
-}
 
 
 def metres(feet):
@@ -91,10 +67,6 @@ def metres(feet):
         return float(feet) * METRES_PER_FOOT
     except BaseException:
         return None
-
-
-def feet(value_m):
-    return value_m / METRES_PER_FOOT
 
 
 def read(obj, name, default=None):
@@ -293,9 +265,11 @@ def classify(doc, stairs):
             return
         if isinstance(answer, list):
             answer = answer[0] if answer else None
-        code = to_text(answer).split(u"  -  ")[0].strip()
-        if code not in rules.BY_CODE:
+        use, _problem = rules.parse_use(
+            to_text(answer).split(u"  -  ")[0].strip())
+        if use is None:
             return
+        code = use.code
         transaction = DB.Transaction(doc, TITLE + u": set stair use")
         transaction.Start()
         refused = 0
@@ -325,153 +299,35 @@ def classify(doc, stairs):
 # Reading a stair
 # --------------------------------------------------------------------------
 
-def curve_points(curves):
-    """Plan points along a set of curves, arcs included."""
-    points = []
-    for curve in curves:
-        try:
-            for point in curve.Tessellate():
-                points.append((point.X, point.Y))
-        except BaseException:
-            try:
-                start = curve.GetEndPoint(0)
-                points.append((start.X, start.Y))
-            except BaseException:
-                pass
-    return points
-
-
-def path_curves(element):
-    loop = call(element, "GetStairsPath")
-    return ids(loop)
-
-
-def run_direction(run):
-    """Plan direction of travel of a flight, from its path, or None."""
-    curves = path_curves(run)
-    if not curves:
-        return None
-    try:
-        start = curves[0].GetEndPoint(0)
-        end = curves[-1].GetEndPoint(1)
-    except BaseException:
-        return None
-    dx, dy = end.X - start.X, end.Y - start.Y
-    if abs(dx) + abs(dy) < 1e-9:
-        return None
-    return (dx, dy)
-
-
-STYLE_STRAIGHT = ("Straight",)
-
-
-def run_style(run):
-    style = read(run, "StairsRunStyle")
-    if style is None:
-        return u"straight"
-    name = to_text(style)
-    if name.split(".")[-1] in STYLE_STRAIGHT:
-        return u"straight"
-    return name.split(".")[-1].lower()
-
-
 def read_runs(doc, stair):
     runs = []
-    elements = []
     for run_id in ids(call(stair, "GetStairsRuns")):
         run = doc.GetElement(run_id)
         if run is None:
             continue
-        elements.append(run)
         base = read(run, "BaseElevation")
         top = read(run, "TopElevation")
         rise = None
         if base is not None and top is not None:
             rise = metres(top - base)
-        runs.append(rules.Run(id_value(run_id),
-                              width=metres(read(run, "ActualRunWidth")),
-                              rise=rise, style=run_style(run)))
-    return runs, elements
+        runs.append(rules.Run(id_value(run_id), rise=rise,
+                              risers=read(run, "ActualRisersNumber")))
+    return runs
 
 
-def read_landings(doc, stair, run_elements):
-    landings = []
-    for landing_id in ids(call(stair, "GetStairsLandings")):
-        landing = doc.GetElement(landing_id)
-        if landing is None:
-            continue
-        points = curve_points(ids(call(landing, "GetFootprintBoundary")))
-        if len(points) < 3:
-            landings.append(rules.Landing(id_value(landing_id)))
-            continue
-        direction = None
-        base = read(landing, "BaseElevation")
-        for run in run_elements:
-            top = read(run, "TopElevation")
-            if base is not None and top is not None and \
-                    abs(top - base) < feet(0.02):
-                direction = run_direction(run)
-                break
-        if direction is not None:
-            length = rules.extent_along(points, direction)
-            landings.append(rules.Landing(id_value(landing_id),
-                                          length=metres(length)))
-        else:
-            landings.append(rules.Landing(
-                id_value(landing_id),
-                length=metres(rules.smallest_width(points)),
-                measured_along=False))
-    return landings
-
-
-def read_type(doc, stair):
-    """(has_risers, nosing m, tread thickness m), None where unreadable."""
+def read_nosing(doc, stair):
+    """The nosing length in metres, 0 for steps without treads, or None."""
     try:
         stair_type = doc.GetElement(stair.GetTypeId())
         run_type = doc.GetElement(stair_type.RunType)
     except BaseException as exc:
         logger.debug(to_text(exc))
-        return None, None, None
+        return None
     if run_type is None:
-        return None, None, None
-    has_risers = read(run_type, "HasRisers")
-    has_treads = read(run_type, "HasTreads")
-    nosing = metres(read(run_type, "NosingLength"))
-    if has_treads is False:
-        nosing = 0.0
-    return has_risers, nosing, metres(read(run_type, "TreadThickness"))
-
-
-def read_railings(doc, stair):
-    railings = []
-    parts = []
-    for railing_id in ids(call(stair, "GetAssociatedRailings")):
-        railing = doc.GetElement(railing_id)
-        if railing is None:
-            continue
-        parts.append(railing_id)
-        for extra in ids(call(railing, "GetHandRails")):
-            parts.append(extra)
-        top_rail = read(railing, "TopRail")
-        if top_rail is not None and valid(top_rail):
-            parts.append(top_rail)
-        railing_type = doc.GetElement(railing.GetTypeId())
-        top = None
-        grips = []
-        if railing_type is not None:
-            if valid(read(railing_type, "TopRailType")):
-                top = metres(read(railing_type, "TopRailHeight"))
-            for kind, height in (("PrimaryHandrailType",
-                                  "PrimaryHandrailHeight"),
-                                 ("SecondaryHandrailType",
-                                  "SecondaryHandrailHeight")):
-                if valid(read(railing_type, kind)):
-                    value = metres(read(railing_type, height))
-                    if value is not None:
-                        grips.append(value)
-        railings.append(rules.Railing(id_value(railing_id), top=top,
-                                      handrails=grips))
-    return railings, parts
+        return None
+    if read(run_type, "HasTreads") is False:
+        return 0.0
+    return metres(read(run_type, "NosingLength"))
 
 
 def plan_of(stair):
@@ -486,143 +342,22 @@ def plan_of(stair):
 
 
 class Reading(object):
-    def __init__(self, element, data, run_elements, railing_parts,
-                 level=u""):
+    def __init__(self, element, data, level=u""):
         self.element = element
         self.data = data
-        self.run_elements = run_elements
-        self.railing_parts = railing_parts
         self.level = level
 
 
 def read_stair(doc, stair):
-    runs, run_elements = read_runs(doc, stair)
-    has_risers, nosing, thickness = read_type(doc, stair)
-    railings, parts = read_railings(doc, stair)
     data = rules.Stair(
-        id_value(stair.Id), name=to_text(read(stair, "Name", u"")),
-        use_value=use_value(stair),
+        id_value(stair.Id), use_value=use_value(stair),
         riser=metres(read(stair, "ActualRiserHeight")),
         going=metres(read(stair, "ActualTreadDepth")),
         base=metres(read(stair, "BaseElevation")),
         top=metres(read(stair, "TopElevation")),
-        runs=runs, landings=read_landings(doc, stair, run_elements),
-        has_risers=has_risers, nosing=nosing, tread_thickness=thickness,
-        railings=railings, plan=plan_of(stair))
-    return Reading(stair, data, run_elements, parts, level_of(doc, stair))
-
-
-# --------------------------------------------------------------------------
-# Headroom
-# --------------------------------------------------------------------------
-
-def make_view(doc):
-    for view_type in DB.FilteredElementCollector(doc).OfClass(
-            DB.ViewFamilyType):
-        try:
-            if view_type.ViewFamily == DB.ViewFamily.ThreeDimensional:
-                return DB.View3D.CreateIsometric(doc, view_type.Id)
-        except BaseException:
-            continue
-    return None
-
-
-def tread_points(run, riser_ft):
-    """(x, y, z, tangent) at the middle of each tread, from the path."""
-    curves = path_curves(run)
-    treads = read(run, "ActualTreadsNumber")
-    base = read(run, "BaseElevation")
-    if not curves or not treads or base is None or riser_ft is None:
-        return []
-    lengths = []
-    for curve in curves:
-        try:
-            lengths.append(curve.Length)
-        except BaseException:
-            return []
-    total = sum(lengths)
-    if total <= 0:
-        return []
-    found = []
-    step = total / treads
-    for k in range(treads):
-        target = (k + 0.5) * step
-        for curve, length in zip(curves, lengths):
-            if target <= length or curve is curves[-1]:
-                try:
-                    fraction = min(1.0, max(0.0, target / length))
-                    frame = curve.ComputeDerivatives(fraction, True)
-                    origin = frame.Origin
-                    tangent = frame.BasisX
-                except BaseException:
-                    break
-                z = base + (k + 1) * riser_ft
-                found.append((origin.X, origin.Y, z, tangent))
-                break
-            target -= length
-    return found
-
-
-def measure_headroom(doc, readings):
-    """Fill in `headroom` on each stair's data. Nothing is kept.
-
-    The 3D view the rays need is made inside a transaction that is
-    rolled back, so the model is left exactly as it was.
-    """
-    transaction = DB.Transaction(doc, TITLE + u": headroom probe")
-    transaction.Start()
-    try:
-        view = make_view(doc)
-        if view is None:
-            return u"No 3D view type was found, so headroom was not measured."
-        doc.Regenerate()
-        from System.Collections.Generic import List
-        for reading in readings:
-            parts = List[DB.ElementId]()
-            for part in reading.railing_parts:
-                parts.Add(part)
-            if parts.Count:
-                element_filter = DB.ExclusionFilter(parts)
-            else:
-                element_filter = DB.ElementIsElementTypeFilter(True)
-            intersector = DB.ReferenceIntersector(
-                element_filter, DB.FindReferenceTarget.Element, view)
-            intersector.FindReferencesInRevitLinks = True
-            riser_ft = read(reading.element, "ActualRiserHeight")
-            least = None
-            for run, run_data in zip(reading.run_elements,
-                                     reading.data.runs):
-                width = feet(run_data.width) if run_data.width else 0.0
-                side = max(0.0, width / 2.0 - feet(RAY_EDGE_M))
-                for x, y, z, tangent in tread_points(run, riser_ft):
-                    nx, ny = -tangent.Y, tangent.X
-                    size = (nx * nx + ny * ny) ** 0.5 or 1.0
-                    nx, ny = nx / size, ny / size
-                    for offset in (0.0, side, -side):
-                        origin = DB.XYZ(x + nx * offset, y + ny * offset,
-                                        z + feet(RAY_LIFT_M))
-                        hit = intersector.FindNearest(origin, DB.XYZ.BasisZ)
-                        if hit is None:
-                            continue
-                        clearance = metres(hit.Proximity) + RAY_LIFT_M
-                        if least is None or clearance < least:
-                            least = clearance
-            if least is None:
-                # Nothing above any tread: open to the sky, or the path
-                # could not be read. Only the first is a pass.
-                if any(tread_points(run, riser_ft)
-                       for run in reading.run_elements):
-                    least = rules.OPEN
-            reading.data.headroom = least
-        return u""
-    except BaseException as exc:
-        logger.debug(to_text(exc))
-        return u"Headroom could not be measured: {0}".format(to_text(exc))
-    finally:
-        try:
-            transaction.RollBack()
-        except BaseException:
-            pass
+        runs=read_runs(doc, stair), nosing=read_nosing(doc, stair),
+        plan=plan_of(stair))
+    return Reading(stair, data, level_of(doc, stair))
 
 
 # --------------------------------------------------------------------------
@@ -642,7 +377,6 @@ SUMMARY_LABEL = {
     rules.PASS: u"pass",
 }
 
-
 LINE_LABEL = {
     rules.FAIL: u"FAIL",
     rules.CHECK: u"check",
@@ -660,47 +394,58 @@ def problems_of(results):
     return [r for r in results if r.status != rules.PASS]
 
 
-def report(entries, note):
+def measured(data):
+    """Riser, going and pitch as table cells, measured even when no rule
+    could be applied."""
+    riser = u"{0:.0f}".format(data.riser * 1000) if data.riser else u""
+    going = u"{0:.0f}".format(data.going * 1000) if data.going else u""
+    slope = rules.slope_of(data.riser, data.going)
+    pitch = u"{0:.1f}\u00b0".format(slope) if slope is not None else u""
+    return riser, going, pitch
+
+
+def report(entries):
     """A summary table of every stair, then only what needs attention.
 
-    Each table is printed in one call. pyRevit draws every print_md call
-    as its own block, so a table printed a row at a time came out as a
-    stack of one row tables, each with its own column widths, which is
-    what made the first report unreadable.
+    Each table is printed in one call: pyRevit draws every print_md call
+    as its own block, and a table printed a row at a time came out as a
+    stack of one row tables with their own column widths.
     """
     counts = {}
     for _reading, _use, results in entries:
         status = rules.worst(results)
         counts[status] = counts.get(status, 0) + 1
-    head = [
+    output.print_md(u"\n".join([
         u"### {0}".format(TITLE),
-        u"Byggingarregluger\u00f0 112/2012, \u00fatg\u00e1fa \u00ed gildi "
-        u"fr\u00e1 1. ma\u00ed 2026, 6.4.6 to 6.4.10 and 6.5.1 to 6.5.5.",
+        u"Byggingarregluger\u00f0 112/2012 (\u00fatg\u00e1fa \u00ed gildi "
+        u"fr\u00e1 1. ma\u00ed 2026) 6.4.9 and 6.4.10; IST EN ISO 14122:2016 "
+        u"for stairs set to To_Machinery.",
         u"",
         u"**{0} stair(s): {1} fail, {2} to check, {3} incomplete, {4} "
         u"pass.**".format(len(entries), counts.get(rules.FAIL, 0),
                           counts.get(rules.CHECK, 0),
                           counts.get(rules.NOT_CHECKED, 0),
-                          counts.get(rules.PASS, 0)),
-    ]
-    if note:
-        head += [u"", u"_{0}_".format(note)]
-    output.print_md(u"\n".join(head))
+                          counts.get(rules.PASS, 0))]))
 
     entries = sorted(entries, key=lambda e: (ORDER[rules.worst(e[2])],
                                              e[0].level, e[0].data.element_id))
-    table = [u"| Stair | Level | Use | Result | Needs attention |",
-             u"| --- | --- | --- | --- | --- |"]
+    table = [u"| Stair | Level | Use | Riser mm | Going mm | Pitch | Result "
+             u"| Needs attention |",
+             u"| --- | --- | --- | ---: | ---: | ---: | --- | --- |"]
     for reading, use, results in entries:
         names = []
         for result in problems_of(results):
             if result.rule not in names:
                 names.append(result.rule)
-        table.append(u"| {0} | {1} | {2} | {3} | {4} |".format(
-            output.linkify(reading.element.Id), cell(reading.level),
-            cell(use.code if use is not None else u"(none)"),
-            SUMMARY_LABEL[rules.worst(results)],
-            cell(u", ".join(names) or u"")))
+        riser, going, pitch = measured(reading.data)
+        table.append(u"| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} "
+                     u"|".format(
+                         output.linkify(reading.element.Id),
+                         cell(reading.level),
+                         cell(use.code if use is not None else u"(none)"),
+                         riser, going, pitch,
+                         SUMMARY_LABEL[rules.worst(results)],
+                         cell(u", ".join(names))))
     output.print_md(u"\n".join(table))
 
     for reading, use, results in entries:
@@ -714,60 +459,12 @@ def report(entries, note):
         for result in problems:
             lines.append(u"- **{0}** {1}{2}: {3}".format(
                 LINE_LABEL[result.status],
-                result.article + u" " if result.article else u"",
+                result.source + u" " if result.source else u"",
                 result.rule, result.message))
         passed = len(results) - len(problems)
         if passed:
             lines.append(u"- {0} other rule(s) pass".format(passed))
         output.print_md(u"\n".join(lines))
-
-    output.print_md(
-        u"_Not read from the model, so not checked: doors at landings "
-        u"(6.4.7), handrail extensions of 0.30 m past the end steps "
-        u"(6.5.2), nosing edges and materials, gaps beside the stair "
-        u"(6.4.6), guard openings (6.5.3), and markings for the visually "
-        u"impaired. Width is Revit's run width; the regulation measures "
-        u"wall to handrail, which is narrower._")
-
-
-def count_loose_railings(doc, readings):
-    """Count railings drawn separately along each stair.
-
-    A railing that is not hosted on any stair, whose box overlaps the
-    stair's in plan (with 0.3 m to spare) and in height.
-    """
-    railing_class = getattr(DB.Architecture, "Railing", None)
-    boxes = []
-    try:
-        railings = list(DB.FilteredElementCollector(doc).OfClass(
-            railing_class).WhereElementIsNotElementType())
-    except BaseException as exc:
-        logger.debug(to_text(exc))
-        return
-    for railing in railings:
-        # One unreadable railing must not cost the count for the rest.
-        try:
-            if valid(read(railing, "HostId")):
-                continue
-            box = railing.get_BoundingBox(None)
-        except BaseException as exc:
-            logger.debug(to_text(exc))
-            continue
-        if box is not None:
-            boxes.append((metres(box.Min.X), metres(box.Min.Y),
-                          metres(box.Min.Z), metres(box.Max.X),
-                          metres(box.Max.Y), metres(box.Max.Z)))
-    spare = 0.3
-    for reading in readings:
-        plan = reading.data.plan
-        base, top = reading.data.base, reading.data.top
-        if plan is None or base is None or top is None:
-            continue
-        reading.data.loose_railings = len([
-            b for b in boxes
-            if b[0] < plan[2] + spare and plan[0] - spare < b[3] and
-            b[1] < plan[3] + spare and plan[1] - spare < b[4] and
-            b[2] < top and base < b[5]])
 
 
 def find_stairs(doc):
@@ -846,9 +543,8 @@ def run():
     if all(use_parameter(s) is None for s in stairs):
         if forms.alert(
                 u"The stairs have no {0} parameter, so the tool cannot tell "
-                u"a stair in a dwelling from outdoor steps, and only the "
-                u"rules for every stair can be checked.\n\nAdd the "
-                u"parameter to Stairs now?".format(rules.PARAMETER),
+                u"which rules apply to which stair.\n\nAdd the parameter to "
+                u"Stairs now?".format(rules.PARAMETER),
                 title=TITLE, yes=True, no=True):
             problem = add_parameter(doc)
             if problem:
@@ -856,8 +552,6 @@ def run():
     classify(doc, stairs)
 
     readings = [read_stair(doc, stair) for stair in stairs]
-    count_loose_railings(doc, readings)
-    note = measure_headroom(doc, readings)
     wells = rules.stairwells([r.data for r in readings])
     entries = []
     for reading in readings:
@@ -865,7 +559,7 @@ def run():
         entries.append((reading, use, results))
     del RESULTS[:]
     RESULTS.extend(entries)
-    report(entries, note)
+    report(entries)
 
 
 if __name__ == "__main__":

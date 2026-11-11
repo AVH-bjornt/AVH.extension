@@ -1,0 +1,6 @@
+title: "Gönguhlutfall\nstiga"
+tooltip: >
+  Checks the rise and going of every stair in the model: uppstig,
+  framstig, 2h + b, slope and nosing against Byggingarreglugerð
+  6.4.9 and 6.4.10, or against ÍST EN ISO 14122 for stairs whose
+  AVH_Stair_Use is To_Machinery.

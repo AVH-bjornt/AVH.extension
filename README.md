@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.33.2.** The authoritative number is `__version__` in
+**Version 2.34.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -174,38 +174,36 @@ that as "too thin for its given type". The confirmation warns when that
 will happen and names the highest level that works; if Revit refuses
 anyway, the tool says so in plain words instead of Revit's error dialog.
 
-**Stair Check.** Checks every stair in the model against
-Byggingarreglugerð 112/2012 (the version in force from 1 May 2026,
-articles 6.4.6 to 6.4.10 and 6.5.1 to 6.5.5) and prints a summary
-table with one row per stair (link, level, use, result, and the rules
-that need attention), failing stairs first. Below it, only the stairs
-with problems, one line per problem with its article; passes are only
-counted. It checks riser, going, slope, 2h + b and nosing;
-the same steps on every floor of a stairwell; open riser gaps; rise
-between landings and landing length; width; headroom of 2.10 m, by rays
-cast up from every tread (linked models included, so a structural slab
-edge is found); and handrails on both sides, handrail height and guard
-height. Changes nothing except the use parameter below.
+**Gönguhlutfall stiga.** Checks the rise and going of every stair in
+the model and nothing else: riser (uppstig), going (framstig), 2h + b,
+slope, nosing, and the same steps in every flight and on every floor of
+a stairwell. The rules depend on the stair's use, held in the text
+parameter `AVH_Stair_Use`:
 
-Which limits apply depends on what the stair is for, which Revit does
-not know. Each stair carries it in the text parameter `AVH_Stair_Use`,
-one of: `ibud` (inside a dwelling), `fjolbyli_lyfta` and `fjolbyli`
-(serving several dwellings, with or without a stretcher lift),
-`fyrirtaeki` (several companies), `almenningur` (open to the public),
-`annar` (other indoor stair, e.g. technical), `uti_adal` (outdoor steps
-at a main entrance), `uti` (other outdoor steps), `uti_svalir` (from a
-dwelling's balcony to the garden). Icelandic spelling works too. If the
-model has no such parameter the tool offers to add it, and stairs
-without a value can be set from a list before the check runs.
+| Code | Checked against |
+| --- | --- |
+| `almennur` | Byggingarreglugerð 6.4.9, 1st paragraph: stairs for general use indoors |
+| `annar` | 6.4.9, 2nd paragraph: other indoor stairs, by slope band a to e |
+| `uti` | 6.4.10: outdoor steps |
+| `To_Machinery` | ÍST EN ISO 14122:2016. The pitch decides the kind of access (part 1, clause 3): a stair (part 3, clause 5) from 20° to 45°, a step ladder (part 3, clause 6) up to 75°, a fixed ladder (part 4, 5.2.2.2) above that; 20° or less is a ramp |
 
-Results are **pass**, **FAIL**, **check** where the answer depends on
-something the model does not say (which side has a wall, whether the
-public uses outdoor steps), and **not checked** where a value could not
-be read. Railings drawn separately along a stair, rather than placed on
-it, turn a missing handrail into a check. Width is Revit's run width; the regulation measures wall to
-handrail, which is narrower. Not checked at all: doors at landings,
-handrail extensions past the end steps, guard openings, gaps beside the
-stair, nosing materials and markings.
+The codes from Stair Check 2.33 still work: `ibud`, `fjolbyli_lyfta`,
+`fjolbyli`, `fyrirtaeki` and `almenningur` read as `almennur`, and
+`uti_adal` and `uti_svalir` as `uti`. If the model has no such parameter
+the tool offers to add it, and stairs without a value can be set from a
+list before the check runs.
+
+The report is one summary table, a row per stair with link, level, use,
+riser, going, pitch, result and the rules that need attention, failing
+stairs first; then only the stairs with problems, one line per problem
+with its source. Results are **pass**, **FAIL**, **check** where the
+text recommends rather than requires, and **not checked** where a value
+could not be read or no use is set. Changes nothing except the use
+parameter.
+
+The ISO 14122 standards are licensed to AVH for one workstation and are
+not part of this extension; the code cites clause numbers and figures
+only.
 
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
@@ -329,7 +327,8 @@ does not.
 | 2.32.0 | Ground filter option for clouds with people, vehicles and plants | Not yet run in Revit |
 | 2.33.0 | Tools panel: Stair Check against Byggingarreglugerð 112/2012 | Found no stairs: every stair read as being edited |
 | 2.33.1 | Stair Check reads IsInEditMode as the method it is, and says what there is when it finds no stairs | Worked; report hard to read |
-| 2.33.2 | Stair Check report: summary table, then only the problems; separately drawn railings found | Current |
+| 2.33.2 | Stair Check report: summary table, then only the problems; separately drawn railings found | Not yet run in Revit |
+| 2.34.0 | Stair Check becomes Gönguhlutfall stiga: rise and going only; To_Machinery checked against ÍST EN ISO 14122 | Current |
 
 ## Licence
 
