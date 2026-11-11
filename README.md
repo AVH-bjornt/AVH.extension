@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.33.0.** The authoritative number is `__version__` in
+**Version 2.33.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -324,7 +324,8 @@ does not.
 | 2.30.1 | Point cloud read asks for 999 999 points at most | Read worked; too thin on the first level, 65 mm under the top on a lower one |
 | 2.31.0 | Toposolid kept within 0.5 m and compared vertex by vertex; too thin warned and caught | Not yet run in Revit |
 | 2.32.0 | Ground filter option for clouds with people, vehicles and plants | Not yet run in Revit |
-| 2.33.0 | Tools panel: Stair Check against Byggingarreglugerð 112/2012 | Current |
+| 2.33.0 | Tools panel: Stair Check against Byggingarreglugerð 112/2012 | Found no stairs: every stair read as being edited |
+| 2.33.1 | Stair Check reads IsInEditMode as the method it is, and says what there is when it finds no stairs | Current |
 
 ## Licence
 

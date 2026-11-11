@@ -515,7 +515,7 @@ class FakeStairs(FakeElement):
                  railings=2, top_rail=0.90, handrail=0.90, landing=1.40,
                  has_param=True, read_only=False):
         FakeElement.__init__(self, doc, value, stairs_type.Id)
-        self.IsInEditMode = False
+        self.editing = False
         self.ActualRiserHeight = riser * FT
         self.ActualTreadDepth = going * FT
         self.ActualRisersNumber = risers
@@ -543,6 +543,15 @@ class FakeStairs(FakeElement):
                 y_end * FT, (base + 0.8) * FT, (base + risers * riser + 1.0)
                 * FT))
         self.x, self.width, self.y_end = x, width, y_end
+
+    def IsInEditMode(self):
+        # A method in the Revit API, not a property. Read as a property
+        # it is a bound method, which is truthy: the first live run
+        # skipped every stair because of exactly that.
+        return self.editing
+
+    def GetType(self):
+        return Namespace(Name=u"Stairs")
 
     def LookupParameter(self, name):
         if name == u"AVH_Stair_Use" and self.param is not None:
@@ -585,6 +594,10 @@ class FakeDoc(object):
         self.slabs = []          # (x0, y0, x1, y1, z) in feet, host
         self.linked_slabs = []   # same, in a linked model
         self.views = []
+        self.family_stairs = []  # elements in the Stairs category, by class
+        self.links = []
+        self.collector_raises = False
+        self.Title = u"host"
         self.bound = False
         self.commit_status = commit_status
         self.transactions = []
@@ -616,6 +629,7 @@ class FakeDoc(object):
 class FakeBindings(object):
     def __init__(self, doc):
         self.doc = doc
+        self.inserted = (None, None, None)
 
     def Insert(self, definition, binding, group):
         self.doc.bound = True
@@ -739,7 +753,13 @@ class FakeCollector(object):
         self.cls = None
 
     def OfClass(self, cls):
+        if self.doc.collector_raises and cls is FakeStairs:
+            raise Exception("collector failed")
         self.cls = cls
+        return self
+
+    def OfCategory(self, category):
+        self.cls = "category:" + category
         return self
 
     def WhereElementIsNotElementType(self):
@@ -748,6 +768,13 @@ class FakeCollector(object):
     def __iter__(self):
         if self.cls is FakeStairs:
             return iter(list(self.doc.stairs))
+        if self.cls == "category:OST_Stairs":
+            return iter(list(self.doc.stairs) + [
+                Namespace(GetType=lambda kind=kind: Namespace(Name=kind))
+                for kind in self.doc.family_stairs])
+        if self.cls == "RevitLinkInstance":
+            return iter([Namespace(GetLinkDocument=lambda d=d: d)
+                         for d in self.doc.links])
         if self.cls == "ViewFamilyType":
             return iter([Namespace(ViewFamily="3D", Id=FakeId(5))])
         return iter([])
@@ -818,6 +845,7 @@ def run_script(doc, recorder=None):
         GroupTypeId=Namespace(IdentityData="identity"),
         Category=Namespace(GetCategory=lambda d, c: "Stairs"),
         BuiltInCategory=Namespace(OST_Stairs="OST_Stairs"),
+        RevitLinkInstance="RevitLinkInstance",
     )
     system = types.ModuleType("System")
     system.Guid = lambda text: u"guid:" + text
@@ -870,6 +898,12 @@ def section(recorder, stair_id):
     return lines[start:] if start is not None else []
 
 
+def first(recorder, stair_id):
+    """The heading line of a stair's section, or u"" when it has none."""
+    lines = section(recorder, stair_id)
+    return lines[0] if lines else u""
+
+
 def row(recorder, stair_id, rule):
     return [line for line in section(recorder, stair_id)
             if line.startswith(u"| {0} |".format(rule))]
@@ -881,7 +915,7 @@ doc.add(1, use=u"fyrirtaeki")
 doc.slab(0, 0, 10, 20, 3.40 + 2.6)
 rec = run_script(doc)
 check("script: the good stair passes",
-      section(rec, 1) and u"pass" in section(rec, 1)[0] and
+      section(rec, 1) and u"pass" in first(rec, 1) and
       u"FAIL" not in u"\n".join(section(rec, 1)), section(rec, 1))
 check("script: the riser was read in metres from feet",
       any(u"170 mm" in line for line in row(rec, 1, u"Riser")),
@@ -948,9 +982,9 @@ check("fails: riser 190 mm", any(u"FAIL" in line
 check("fails: width 1.00 m for several companies",
       any(u"FAIL" in line for line in row(rec, 2, u"Width")))
 check("fails: the failing stair is listed before the passing one",
-      section(rec, 1) and section(rec, 2) and
-      rec.printed.index(section(rec, 2)[0]) <
-      rec.printed.index(section(rec, 1)[0]))
+      bool(section(rec, 1) and section(rec, 2)) and
+      rec.printed.index(first(rec, 2)) <
+      rec.printed.index(first(rec, 1)))
 check("fails: the summary counts one fail and one pass",
       any(u"1 fail" in line and u"1 pass" in line for line in rec.printed),
       [line for line in rec.printed if u"stair(s)" in line])
@@ -1010,7 +1044,7 @@ check("unclassified: reported as such",
 check("misclassified: the bad value is named",
       any(u"skrifstofa" in line for line in section(rec, 2)))
 check("Icelandic spelling: classified",
-      u"fyrirt" in section(rec, 3)[0], section(rec, 3)[:1])
+      u"fyrirt" in first(rec, 3), section(rec, 3)[:1])
 
 # 11. No parameter: offer to add, add it, then classify.
 doc = FakeDoc()
@@ -1023,18 +1057,18 @@ check("parameter: offered", any(u"Add the parameter" in q
                                  for q in rec.questions), rec.questions)
 check("parameter: bound to the model", doc.bound)
 check("parameter: bound with AVH's GUID and as text in Identity Data",
-      doc.ParameterBindings.inserted[0].GUID ==
+      getattr(doc.ParameterBindings.inserted[0], "GUID", None) ==
       u"guid:f03e1b0f-96ae-4317-ba74-010f759f77eb" and
       doc.ParameterBindings.inserted[2] == "identity")
 check("parameter: the user's shared parameter file is put back",
       doc.Application.SharedParametersFilename == original)
 check("classify: the ticked stair got the use",
-      doc.stairs[0].param.value == u"fyrirtaeki",
-      doc.stairs[0].param.value)
+      getattr(doc.stairs[0].param, "value", None) == u"fyrirtaeki",
+      getattr(doc.stairs[0].param, "value", None))
 check("classify: the other stays blank",
       doc.stairs[1].param is None or doc.stairs[1].param.value == u"")
 check("classify: and the check used it",
-      u"fyrirt" in section(rec, 1)[0], section(rec, 1)[:1])
+      u"fyrirt" in first(rec, 1), section(rec, 1)[:1])
 
 doc = FakeDoc()
 doc.add(1, has_param=False)
@@ -1055,10 +1089,45 @@ rec = run_script(doc, Recorder(tick="ALL", use=u"ibud"))
 check("classify: a read only parameter is reported",
       any(u"would not take" in a for a in rec.alerts), rec.alerts)
 
-# 13. No stairs.
+# 13. No stairs, and what there is instead.
 doc = FakeDoc()
 rec = run_script(doc)
-check("no stairs: said so", any(u"no stairs" in a for a in rec.alerts))
+check("no stairs: said so", any(u"No Revit stairs" in a for a in rec.alerts),
+      rec.alerts)
+
+doc = FakeDoc()
+doc.add(1, use=u"fyrirtaeki")
+doc.add(2, use=u"fyrirtaeki", x=8.0)
+doc.stairs[1].editing = True
+rec = run_script(doc)
+check("edit mode: the stair being edited is skipped, the other checked",
+      section(rec, 1) and not section(rec, 2), rec.alerts)
+
+doc = FakeDoc()
+doc.add(1, use=u"fyrirtaeki")
+doc.stairs[0].editing = True
+rec = run_script(doc)
+check("edit mode: the only stair being edited is named as the reason",
+      any(u"being edited" in a for a in rec.alerts), rec.alerts)
+
+doc = FakeDoc()
+doc.family_stairs = [u"FamilyInstance", u"FamilyInstance", u"Element"]
+link = FakeDoc()
+link.Title = u"ELG_BUR"
+link.add(1)
+doc.links = [link]
+rec = run_script(doc)
+check("no stairs: stair families in the category are counted by kind",
+      any(u"2 FamilyInstance" in a and u"1 Element" in a
+          for a in rec.alerts), rec.alerts)
+check("no stairs: stairs in a link are named with the link",
+      any(u"1 in ELG_BUR" in a for a in rec.alerts), rec.alerts)
+
+doc = FakeDoc()
+doc.collector_raises = True
+rec = run_script(doc)
+check("no stairs: a failed search says so, not just nothing found",
+      any(u"collector failed" in a for a in rec.alerts), rec.alerts)
 
 # --------------------------------------------------------------------------
 

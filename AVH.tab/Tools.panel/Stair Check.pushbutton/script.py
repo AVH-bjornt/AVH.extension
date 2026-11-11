@@ -98,12 +98,26 @@ def feet(value_m):
 
 
 def read(obj, name, default=None):
-    """A property, or default when it is missing or raises."""
+    """A property's value, or default when it is missing or raises.
+
+    Also takes a member that turns out to be a method, and calls it.
+    Stairs.IsInEditMode is one: read as a property it is a bound method,
+    which is truthy, so every stair looked as if it were being edited and
+    the first live run (2026-11-11) found "no stairs" in a model full of
+    them. Guessing property or method per member is how that happened,
+    so this no longer depends on the guess.
+    """
     try:
         value = getattr(obj, name)
     except BaseException as exc:
         logger.debug(u"{0}: {1}".format(name, to_text(exc)))
         return default
+    if callable(value) and not isinstance(value, type):
+        try:
+            value = value()
+        except BaseException as exc:
+            logger.debug(u"{0}(): {1}".format(name, to_text(exc)))
+            return default
     return value
 
 
@@ -648,21 +662,77 @@ def report(entries, note):
                 result.message))
 
 
+def find_stairs(doc):
+    """(stairs to check, how many are in edit mode, error text)."""
+    stairs_class = getattr(DB.Architecture, "Stairs", None)
+    found = []
+    editing = 0
+    try:
+        collector = DB.FilteredElementCollector(doc).OfClass(stairs_class)
+        for stair in collector.WhereElementIsNotElementType():
+            if read(stair, "IsInEditMode", False) is True:
+                editing += 1
+            else:
+                found.append(stair)
+    except BaseException as exc:
+        return found, editing, to_text(exc)
+    return found, editing, u""
+
+
+def no_stairs_message(doc, editing, problem):
+    """Say what there is instead, so "no stairs" is never a dead end."""
+    lines = [u"No Revit stairs were found to check."]
+    if problem:
+        lines.append(u"Revit refused the search: {0}".format(problem))
+    if editing:
+        lines.append(u"{0} stair(s) are being edited. Finish the edit and "
+                     u"run again.".format(editing))
+    others = {}
+    try:
+        collector = DB.FilteredElementCollector(doc).OfCategory(
+            DB.BuiltInCategory.OST_Stairs).WhereElementIsNotElementType()
+        for element in collector:
+            kind = to_text(read(element.GetType(), "Name", u"?"))
+            if kind != u"Stairs":
+                others[kind] = others.get(kind, 0) + 1
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+    if others:
+        lines.append(u"The Stairs category holds {0}, which are not Revit "
+                     u"stairs (stair families or older sketched stairs) "
+                     u"and cannot be read this way.".format(u", ".join(
+                         u"{0} {1}".format(count, kind)
+                         for kind, count in sorted(others.items()))))
+    linked = []
+    try:
+        for link in DB.FilteredElementCollector(doc).OfClass(
+                DB.RevitLinkInstance):
+            link_doc = link.GetLinkDocument()
+            if link_doc is None:
+                continue
+            count = len(list(DB.FilteredElementCollector(link_doc).OfClass(
+                getattr(DB.Architecture, "Stairs", None))
+                .WhereElementIsNotElementType()))
+            if count:
+                linked.append(u"{0} in {1}".format(count, to_text(
+                    read(link_doc, "Title", u"a link"))))
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+    if linked:
+        lines.append(u"Linked models have stairs: {0}. This tool checks "
+                     u"the open model only; open that model to check "
+                     u"them.".format(u", ".join(linked)))
+    return u"\n\n".join(lines)
+
+
 def run():
     doc = revit.doc
     if doc is None:
         forms.alert(u"No active Revit document.", title=TITLE)
         return
-    stairs_class = getattr(DB.Architecture, "Stairs", None)
-    stairs = []
-    try:
-        collector = DB.FilteredElementCollector(doc).OfClass(stairs_class)
-        stairs = [s for s in collector.WhereElementIsNotElementType()
-                  if not read(s, "IsInEditMode", False)]
-    except BaseException as exc:
-        logger.debug(to_text(exc))
+    stairs, editing, problem = find_stairs(doc)
     if not stairs:
-        forms.alert(u"This model has no stairs to check.", title=TITLE)
+        forms.alert(no_stairs_message(doc, editing, problem), title=TITLE)
         return
 
     if all(use_parameter(s) is None for s in stairs):
