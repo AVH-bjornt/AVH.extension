@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.32.0.** The authoritative number is `__version__` in
+**Version 2.33.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -174,6 +174,36 @@ that as "too thin for its given type". The confirmation warns when that
 will happen and names the highest level that works; if Revit refuses
 anyway, the tool says so in plain words instead of Revit's error dialog.
 
+**Stair Check.** Checks every stair in the model against
+Byggingarreglugerð 112/2012 (the version in force from 1 May 2026,
+articles 6.4.6 to 6.4.10 and 6.5.1 to 6.5.5) and prints a report per
+stair with the article for each result, failing stairs first, each with
+a link that selects it. It checks riser, going, slope, 2h + b and nosing;
+the same steps on every floor of a stairwell; open riser gaps; rise
+between landings and landing length; width; headroom of 2.10 m, by rays
+cast up from every tread (linked models included, so a structural slab
+edge is found); and handrails on both sides, handrail height and guard
+height. Changes nothing except the use parameter below.
+
+Which limits apply depends on what the stair is for, which Revit does
+not know. Each stair carries it in the text parameter `AVH_Stair_Use`,
+one of: `ibud` (inside a dwelling), `fjolbyli_lyfta` and `fjolbyli`
+(serving several dwellings, with or without a stretcher lift),
+`fyrirtaeki` (several companies), `almenningur` (open to the public),
+`annar` (other indoor stair, e.g. technical), `uti_adal` (outdoor steps
+at a main entrance), `uti` (other outdoor steps), `uti_svalir` (from a
+dwelling's balcony to the garden). Icelandic spelling works too. If the
+model has no such parameter the tool offers to add it, and stairs
+without a value can be set from a list before the check runs.
+
+Results are **pass**, **FAIL**, **CHECK** where the answer depends on
+something the model does not say (which side has a wall, whether the
+public uses outdoor steps), and **not checked** where a value could not
+be read. Width is Revit's run width; the regulation measures wall to
+handrail, which is narrower. Not checked at all: doors at landings,
+handrail extensions past the end steps, guard openings, gaps beside the
+stair, nosing materials and markings.
+
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
 design option, category or subcategory hidden, explicitly hidden, a view
@@ -293,7 +323,8 @@ does not.
 | 2.30.0 | Tools panel: Point Cloud to Toposolid | Revit refused 1 000 000 points per read |
 | 2.30.1 | Point cloud read asks for 999 999 points at most | Read worked; too thin on the first level, 65 mm under the top on a lower one |
 | 2.31.0 | Toposolid kept within 0.5 m and compared vertex by vertex; too thin warned and caught | Not yet run in Revit |
-| 2.32.0 | Ground filter option for clouds with people, vehicles and plants | Current |
+| 2.32.0 | Ground filter option for clouds with people, vehicles and plants | Not yet run in Revit |
+| 2.33.0 | Tools panel: Stair Check against Byggingarreglugerð 112/2012 | Current |
 
 ## Licence
 
