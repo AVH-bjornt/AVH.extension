@@ -471,11 +471,16 @@ class FakeRailing(FakeElement):
     def __init__(self, doc, value, railing_type, line_x, y0, y1, z0, z1):
         FakeElement.__init__(self, doc, value, railing_type.Id)
         self.TopRail = INVALID
+        self.HostId = FakeId(77)
         # Where its handrail hangs, for the rays: a strip along x = line_x.
         self.strip = (line_x - 0.05 * FT, y0, line_x + 0.05 * FT, y1, z0, z1)
 
     def GetHandRails(self):
         return []
+
+    def get_BoundingBox(self, view):
+        x0, y0, x1, y1, z0, z1 = self.strip
+        return Namespace(Min=FakeXYZ(x0, y0, z0), Max=FakeXYZ(x1, y1, z1))
 
 
 class FakeRun(FakeElement):
@@ -513,9 +518,11 @@ class FakeStairs(FakeElement):
     def __init__(self, doc, value, stairs_type, use=None, riser=0.170,
                  going=0.280, base=0.0, width=1.20, risers=20, x=2.0,
                  railings=2, top_rail=0.90, handrail=0.90, landing=1.40,
-                 has_param=True, read_only=False):
+                 has_param=True, read_only=False, level=u"DA11.E01"):
         FakeElement.__init__(self, doc, value, stairs_type.Id)
         self.editing = False
+        self.level = FakeElement(doc, value * 10 + 9)
+        self.level.Name = level
         self.ActualRiserHeight = riser * FT
         self.ActualTreadDepth = going * FT
         self.ActualRisersNumber = risers
@@ -562,6 +569,9 @@ class FakeStairs(FakeElement):
         return None
 
     def get_Parameter(self, which):
+        if which == "base":
+            level = self.level
+            return Namespace(AsElementId=lambda: level.Id)
         return None
 
     def GetStairsRuns(self):
@@ -595,6 +605,7 @@ class FakeDoc(object):
         self.linked_slabs = []   # same, in a linked model
         self.views = []
         self.family_stairs = []  # elements in the Stairs category, by class
+        self.loose = []          # railings not hosted on a stair
         self.links = []
         self.collector_raises = False
         self.Title = u"host"
@@ -772,6 +783,9 @@ class FakeCollector(object):
             return iter(list(self.doc.stairs) + [
                 Namespace(GetType=lambda kind=kind: Namespace(Name=kind))
                 for kind in self.doc.family_stairs])
+        if self.cls == "Railing":
+            hosted = [r for stair in self.doc.stairs for r in stair.railings]
+            return iter(hosted + list(self.doc.loose))
         if self.cls == "RevitLinkInstance":
             return iter([Namespace(GetLinkDocument=lambda d=d: d)
                          for d in self.doc.links])
@@ -789,6 +803,7 @@ class Recorder(object):
         self.questions = []
         self.printed = []
         self.pickers = []
+        self.results = []
 
     def alert(self, message, **kwargs):
         if kwargs.get("yes") and kwargs.get("no"):
@@ -825,7 +840,7 @@ class Recorder(object):
 def run_script(doc, recorder=None):
     recorder = recorder or Recorder(add=False)
     db = Namespace(
-        Architecture=Namespace(Stairs=FakeStairs),
+        Architecture=Namespace(Stairs=FakeStairs, Railing="Railing"),
         FilteredElementCollector=FakeCollector,
         ViewFamilyType="ViewFamilyType",
         ViewFamily=Namespace(ThreeDimensional="3D"),
@@ -876,7 +891,8 @@ def run_script(doc, recorder=None):
                                      error=lambda *a: None))
     sys.modules["pyrevit"] = pyrevit
     try:
-        runpy.run_path(SCRIPT, run_name="__main__")
+        found = runpy.run_path(SCRIPT, run_name="__main__")
+        recorder.results = list(found.get("RESULTS", []))
     except Exception as exc:
         recorder.alerts.append(u"<script raised {0!r}>".format(exc))
     finally:
@@ -886,16 +902,31 @@ def run_script(doc, recorder=None):
     return recorder
 
 
+LABEL = {rules.FAIL: u"**FAIL**", rules.CHECK: u"CHECK",
+         rules.PASS: u"pass", rules.NOT_CHECKED: u"not checked"}
+
+
 def section(recorder, stair_id):
-    """The report lines for one stair."""
-    lines = recorder.printed
-    start = None
-    for index, line in enumerate(lines):
-        if line.startswith(u"#### [{0}]".format(stair_id)):
-            start = index
-        elif start is not None and line.startswith(u"#### "):
-            return lines[start:index]
-    return lines[start:] if start is not None else []
+    """Every result for one stair, one line per rule, from the script's
+    own RESULTS. The report prints only problems, so the passes have to
+    be read from there."""
+    for reading, use, found in recorder.results:
+        if reading.data.element_id != stair_id:
+            continue
+        lines = [u"#### [{0}] {1}: {2}".format(
+            stair_id, use.label if use is not None else u"no use set",
+            LABEL[rules.worst(found)])]
+        for result in found:
+            lines.append(u"| {0} | {1} | {2} | {3} |".format(
+                result.rule, result.article, LABEL[result.status],
+                result.message))
+        return lines
+    return []
+
+
+def printed(recorder):
+    """Everything printed, split into lines."""
+    return u"\n".join(recorder.printed).split(u"\n")
 
 
 def first(recorder, stair_id):
@@ -981,10 +1012,26 @@ check("fails: riser 190 mm", any(u"FAIL" in line
                                  for line in row(rec, 2, u"Riser")))
 check("fails: width 1.00 m for several companies",
       any(u"FAIL" in line for line in row(rec, 2, u"Width")))
-check("fails: the failing stair is listed before the passing one",
-      bool(section(rec, 1) and section(rec, 2)) and
-      rec.printed.index(first(rec, 2)) <
-      rec.printed.index(first(rec, 1)))
+summary = [line for line in printed(rec) if line.startswith(u"| [")]
+check("report: the summary lists both stairs, failing one first",
+      len(summary) == 2 and summary[0].startswith(u"| [2]") and
+      summary[1].startswith(u"| [1]"), summary)
+check("report: the summary names the failing rules and the level",
+      summary and u"Riser" in summary[0] and u"Width" in summary[0] and
+      u"DA11.E01" in summary[0], summary[:1])
+check("report: the summary is one table, printed in one call",
+      any(chunk.count(u"\n| [") == 2 for chunk in rec.printed),
+      [c[:80] for c in rec.printed])
+check("report: the failing stair's problems are listed, one per line",
+      any(line.startswith(u"- **FAIL** 6.4.9 1. mgr. Riser: 190 mm")
+          for line in printed(rec)),
+      [l for l in printed(rec) if l.startswith(u"- ")])
+check("report: its passes are counted, not listed",
+      any(u"other rule(s) pass" in line for line in printed(rec)) and
+      not any(u"Going" in line and line.startswith(u"- ")
+              for line in printed(rec)))
+check("report: the passing stair has no problem section",
+      not any(line.startswith(u"#### [1]") for line in printed(rec)))
 check("fails: the summary counts one fail and one pass",
       any(u"1 fail" in line and u"1 pass" in line for line in rec.printed),
       [line for line in rec.printed if u"stair(s)" in line])
@@ -1032,6 +1079,45 @@ check("railings: one railing on a 1.2 m stair fails",
 check("railings: a handrail at 0.95 m on a 1.10 m guard fails",
       any(u"FAIL" in line for line in row(rec, 2, u"Handrail height")),
       row(rec, 2, u"Handrail height"))
+
+# 9b. Railings drawn separately along the stair, not hosted on it.
+doc = FakeDoc()
+doc.add(1, use=u"fyrirtaeki", railings=0)
+doc.add(2, use=u"fyrirtaeki", railings=0, x=20.0)
+doc.loose = [Namespace(
+    HostId=INVALID, Id=FakeId(501),
+    get_BoundingBox=lambda view: Namespace(
+        Min=FakeXYZ(1.3 * FT, 0.0, 0.8 * FT),
+        Max=FakeXYZ(1.45 * FT, 6.0 * FT, 4.2 * FT))),
+    Namespace(
+        HostId=INVALID, Id=FakeId(502),
+        get_BoundingBox=lambda view: Namespace(
+            Min=FakeXYZ(19.3 * FT, 0.0, 10.0 * FT),
+            Max=FakeXYZ(19.45 * FT, 6.0 * FT, 14.0 * FT)))]
+rec = run_script(doc)
+check("loose railings: one drawn along the stair turns the fail into a "
+      "question", any(u"CHECK" in line and u"drawn separately" in line
+                      for line in row(rec, 1, u"Handrails both sides")),
+      row(rec, 1, u"Handrails both sides"))
+check("loose railings: one on the floor above does not count",
+      any(u"FAIL" in line
+          for line in row(rec, 2, u"Handrails both sides")),
+      row(rec, 2, u"Handrails both sides"))
+
+# A stair with no railings right beside one that has its own: the
+# neighbour's hosted railings are not this stair's loose ones.
+doc2 = FakeDoc()
+doc2.add(3, use=u"fyrirtaeki", railings=0, x=2.0)
+doc2.add(4, use=u"fyrirtaeki", x=3.3)
+rec2 = run_script(doc2)
+check("loose railings: a neighbour's hosted railings are not counted",
+      any(u"FAIL" in line
+          for line in row(rec2, 3, u"Handrails both sides")),
+      row(rec2, 3, u"Handrails both sides"))
+check("loose railings: a stair with none near it still fails",
+      any(u"FAIL" in line
+          for line in row(rec, 2, u"Handrails both sides")),
+      row(rec, 2, u"Handrails both sides"))
 
 # 10. Unclassified and misclassified.
 doc = FakeDoc()

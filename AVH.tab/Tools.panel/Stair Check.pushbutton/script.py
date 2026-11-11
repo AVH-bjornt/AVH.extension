@@ -230,17 +230,21 @@ def add_parameter(doc):
             pass
 
 
+def level_of(doc, stair):
+    """The stair's base level name, or u"" when it cannot be read."""
+    try:
+        level = doc.GetElement(stair.get_Parameter(
+            DB.BuiltInParameter.STAIRS_BASE_LEVEL_PARAM).AsElementId())
+        return to_text(level.Name) if level is not None else u""
+    except BaseException:
+        return u""
+
+
 def stair_label(doc, stair):
     base = metres(read(stair, "BaseElevation"))
     top = metres(read(stair, "TopElevation"))
     risers = read(stair, "ActualRisersNumber")
-    level_name = u""
-    try:
-        level = doc.GetElement(stair.get_Parameter(
-            DB.BuiltInParameter.STAIRS_BASE_LEVEL_PARAM).AsElementId())
-        level_name = to_text(level.Name) if level is not None else u""
-    except BaseException:
-        pass
+    level_name = level_of(doc, stair)
     parts = []
     if level_name:
         parts.append(u"from {0}".format(level_name))
@@ -482,11 +486,13 @@ def plan_of(stair):
 
 
 class Reading(object):
-    def __init__(self, element, data, run_elements, railing_parts):
+    def __init__(self, element, data, run_elements, railing_parts,
+                 level=u""):
         self.element = element
         self.data = data
         self.run_elements = run_elements
         self.railing_parts = railing_parts
+        self.level = level
 
 
 def read_stair(doc, stair):
@@ -503,7 +509,7 @@ def read_stair(doc, stair):
         runs=runs, landings=read_landings(doc, stair, run_elements),
         has_risers=has_risers, nosing=nosing, tread_thickness=thickness,
         railings=railings, plan=plan_of(stair))
-    return Reading(stair, data, run_elements, parts)
+    return Reading(stair, data, run_elements, parts, level_of(doc, stair))
 
 
 # --------------------------------------------------------------------------
@@ -623,43 +629,145 @@ def measure_headroom(doc, readings):
 # Report
 # --------------------------------------------------------------------------
 
+# Every check's results, for the harness to read back. The report shows
+# only the problems, so the passes are not in the output window.
+RESULTS = []
+
+ORDER = {rules.FAIL: 0, rules.CHECK: 1, rules.NOT_CHECKED: 2, rules.PASS: 3}
+
+SUMMARY_LABEL = {
+    rules.FAIL: u"FAIL",
+    rules.CHECK: u"check",
+    rules.NOT_CHECKED: u"incomplete",
+    rules.PASS: u"pass",
+}
+
+
+LINE_LABEL = {
+    rules.FAIL: u"FAIL",
+    rules.CHECK: u"check",
+    rules.NOT_CHECKED: u"not checked",
+    rules.PASS: u"pass",
+}
+
+
+def cell(text):
+    """Text safe inside a markdown table cell."""
+    return to_text(text).replace(u"|", u"/").replace(u"\n", u" ")
+
+
+def problems_of(results):
+    return [r for r in results if r.status != rules.PASS]
+
+
 def report(entries, note):
-    output.print_md(u"### {0}".format(TITLE))
-    output.print_md(u"Byggingarregluger\u00f0 112/2012, \u00fatg\u00e1fa "
-                    u"\u00ed gildi fr\u00e1 1. ma\u00ed 2026: 6.4.6 to "
-                    u"6.4.10 and 6.5.1 to 6.5.5.")
-    output.print_md(u"_Not read from the model, so not checked: doors at "
-                    u"landings (6.4.7), handrail extensions of 0.30 m past "
-                    u"the end steps (6.5.2), nosing edges and materials, "
-                    u"gaps beside the stair (6.4.6), guard openings "
-                    u"(6.5.3), and markings for the visually impaired._")
+    """A summary table of every stair, then only what needs attention.
+
+    Each table is printed in one call. pyRevit draws every print_md call
+    as its own block, so a table printed a row at a time came out as a
+    stack of one row tables, each with its own column widths, which is
+    what made the first report unreadable.
+    """
     counts = {}
     for _reading, _use, results in entries:
         status = rules.worst(results)
         counts[status] = counts.get(status, 0) + 1
-    output.print_md(u"**{0} stair(s):** {1} fail, {2} to check, {3} not "
-                    u"fully checked, {4} pass.".format(
-                        len(entries), counts.get(rules.FAIL, 0),
-                        counts.get(rules.CHECK, 0),
-                        counts.get(rules.NOT_CHECKED, 0),
-                        counts.get(rules.PASS, 0)))
+    head = [
+        u"### {0}".format(TITLE),
+        u"Byggingarregluger\u00f0 112/2012, \u00fatg\u00e1fa \u00ed gildi "
+        u"fr\u00e1 1. ma\u00ed 2026, 6.4.6 to 6.4.10 and 6.5.1 to 6.5.5.",
+        u"",
+        u"**{0} stair(s): {1} fail, {2} to check, {3} incomplete, {4} "
+        u"pass.**".format(len(entries), counts.get(rules.FAIL, 0),
+                          counts.get(rules.CHECK, 0),
+                          counts.get(rules.NOT_CHECKED, 0),
+                          counts.get(rules.PASS, 0)),
+    ]
     if note:
-        output.print_md(u"_{0}_".format(note))
-    order = {rules.FAIL: 0, rules.CHECK: 1, rules.NOT_CHECKED: 2,
-             rules.PASS: 3}
-    entries = sorted(entries, key=lambda e: (order[rules.worst(e[2])],
-                                             e[0].data.element_id))
+        head += [u"", u"_{0}_".format(note)]
+    output.print_md(u"\n".join(head))
+
+    entries = sorted(entries, key=lambda e: (ORDER[rules.worst(e[2])],
+                                             e[0].level, e[0].data.element_id))
+    table = [u"| Stair | Level | Use | Result | Needs attention |",
+             u"| --- | --- | --- | --- | --- |"]
     for reading, use, results in entries:
-        output.print_md(u"#### {0} {1}: {2}".format(
-            output.linkify(reading.element.Id),
-            use.label if use is not None else u"no use set",
-            STATUS_LABEL[rules.worst(results)]))
-        output.print_md(u"| Rule | Article | Result | Detail |")
-        output.print_md(u"| --- | --- | --- | --- |")
-        for result in results:
-            output.print_md(u"| {0} | {1} | {2} | {3} |".format(
-                result.rule, result.article, STATUS_LABEL[result.status],
-                result.message))
+        names = []
+        for result in problems_of(results):
+            if result.rule not in names:
+                names.append(result.rule)
+        table.append(u"| {0} | {1} | {2} | {3} | {4} |".format(
+            output.linkify(reading.element.Id), cell(reading.level),
+            cell(use.code if use is not None else u"(none)"),
+            SUMMARY_LABEL[rules.worst(results)],
+            cell(u", ".join(names) or u"")))
+    output.print_md(u"\n".join(table))
+
+    for reading, use, results in entries:
+        problems = problems_of(results)
+        if not problems:
+            continue
+        problems.sort(key=lambda r: ORDER[r.status])
+        lines = [u"#### {0} {1}, {2}".format(
+            output.linkify(reading.element.Id), cell(reading.level),
+            use.label if use is not None else u"no use set")]
+        for result in problems:
+            lines.append(u"- **{0}** {1}{2}: {3}".format(
+                LINE_LABEL[result.status],
+                result.article + u" " if result.article else u"",
+                result.rule, result.message))
+        passed = len(results) - len(problems)
+        if passed:
+            lines.append(u"- {0} other rule(s) pass".format(passed))
+        output.print_md(u"\n".join(lines))
+
+    output.print_md(
+        u"_Not read from the model, so not checked: doors at landings "
+        u"(6.4.7), handrail extensions of 0.30 m past the end steps "
+        u"(6.5.2), nosing edges and materials, gaps beside the stair "
+        u"(6.4.6), guard openings (6.5.3), and markings for the visually "
+        u"impaired. Width is Revit's run width; the regulation measures "
+        u"wall to handrail, which is narrower._")
+
+
+def count_loose_railings(doc, readings):
+    """Count railings drawn separately along each stair.
+
+    A railing that is not hosted on any stair, whose box overlaps the
+    stair's in plan (with 0.3 m to spare) and in height.
+    """
+    railing_class = getattr(DB.Architecture, "Railing", None)
+    boxes = []
+    try:
+        railings = list(DB.FilteredElementCollector(doc).OfClass(
+            railing_class).WhereElementIsNotElementType())
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        return
+    for railing in railings:
+        # One unreadable railing must not cost the count for the rest.
+        try:
+            if valid(read(railing, "HostId")):
+                continue
+            box = railing.get_BoundingBox(None)
+        except BaseException as exc:
+            logger.debug(to_text(exc))
+            continue
+        if box is not None:
+            boxes.append((metres(box.Min.X), metres(box.Min.Y),
+                          metres(box.Min.Z), metres(box.Max.X),
+                          metres(box.Max.Y), metres(box.Max.Z)))
+    spare = 0.3
+    for reading in readings:
+        plan = reading.data.plan
+        base, top = reading.data.base, reading.data.top
+        if plan is None or base is None or top is None:
+            continue
+        reading.data.loose_railings = len([
+            b for b in boxes
+            if b[0] < plan[2] + spare and plan[0] - spare < b[3] and
+            b[1] < plan[3] + spare and plan[1] - spare < b[4] and
+            b[2] < top and base < b[5]])
 
 
 def find_stairs(doc):
@@ -748,12 +856,15 @@ def run():
     classify(doc, stairs)
 
     readings = [read_stair(doc, stair) for stair in stairs]
+    count_loose_railings(doc, readings)
     note = measure_headroom(doc, readings)
     wells = rules.stairwells([r.data for r in readings])
     entries = []
     for reading in readings:
         use, results = rules.check(reading.data, wells)
         entries.append((reading, use, results))
+    del RESULTS[:]
+    RESULTS.extend(entries)
     report(entries, note)
 
 

@@ -145,7 +145,7 @@ class Stair(object):
     def __init__(self, element_id, name=u"", use_value=None, riser=None,
                  going=None, base=None, top=None, runs=(), landings=(),
                  has_risers=None, nosing=None, tread_thickness=None,
-                 railings=(), headroom=None, plan=None):
+                 railings=(), headroom=None, plan=None, loose_railings=0):
         self.element_id = element_id
         self.name = name
         self.use_value = use_value
@@ -160,6 +160,10 @@ class Stair(object):
         self.tread_thickness = tread_thickness
         self.railings = list(railings)
         self.headroom = headroom
+        # Railings next to the stair but not hosted on it: drawn along a
+        # path rather than placed on the stair. Their side and height
+        # are not read, but they are not nothing either.
+        self.loose_railings = loose_railings
         # (min_x, min_y, max_x, max_y) in plan, for finding stacked
         # stairs in the same stairwell.
         self.plan = plan
@@ -479,8 +483,7 @@ def _width(stair, use, results):
     status = PASS if narrowest >= use.min_width - TOLERANCE else FAIL
     results.append(Result(
         u"Width", u"6.4.8", status,
-        u"narrowest flight {0}, at least {1}. Revit's run width; the "
-        u"regulation measures wall to handrail, which is narrower".format(
+        u"narrowest flight {0}, at least {1}".format(
             m(narrowest), m(use.min_width))))
 
 
@@ -506,7 +509,13 @@ def _railings(stair, use, well, results):
     widest = max(widths) if widths else None
     narrowest = min(widths) if widths else None
 
-    if count >= 2:
+    if count == 0 and stair.loose_railings:
+        results.append(Result(
+            u"Handrails both sides", u"6.5.1", CHECK,
+            u"no railings are hosted on this stair, but {0} drawn "
+            u"separately lie along it; their sides and heights are not "
+            u"read".format(stair.loose_railings)))
+    elif count >= 2:
         results.append(Result(u"Handrails both sides", u"6.5.1", PASS,
                               u"{0} railings".format(count)))
     elif count == 1 and narrowest is not None and \

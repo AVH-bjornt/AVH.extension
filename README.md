@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.33.1.** The authoritative number is `__version__` in
+**Version 2.33.2.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -176,9 +176,11 @@ anyway, the tool says so in plain words instead of Revit's error dialog.
 
 **Stair Check.** Checks every stair in the model against
 Byggingarreglugerð 112/2012 (the version in force from 1 May 2026,
-articles 6.4.6 to 6.4.10 and 6.5.1 to 6.5.5) and prints a report per
-stair with the article for each result, failing stairs first, each with
-a link that selects it. It checks riser, going, slope, 2h + b and nosing;
+articles 6.4.6 to 6.4.10 and 6.5.1 to 6.5.5) and prints a summary
+table with one row per stair (link, level, use, result, and the rules
+that need attention), failing stairs first. Below it, only the stairs
+with problems, one line per problem with its article; passes are only
+counted. It checks riser, going, slope, 2h + b and nosing;
 the same steps on every floor of a stairwell; open riser gaps; rise
 between landings and landing length; width; headroom of 2.10 m, by rays
 cast up from every tread (linked models included, so a structural slab
@@ -196,10 +198,11 @@ dwelling's balcony to the garden). Icelandic spelling works too. If the
 model has no such parameter the tool offers to add it, and stairs
 without a value can be set from a list before the check runs.
 
-Results are **pass**, **FAIL**, **CHECK** where the answer depends on
+Results are **pass**, **FAIL**, **check** where the answer depends on
 something the model does not say (which side has a wall, whether the
 public uses outdoor steps), and **not checked** where a value could not
-be read. Width is Revit's run width; the regulation measures wall to
+be read. Railings drawn separately along a stair, rather than placed on
+it, turn a missing handrail into a check. Width is Revit's run width; the regulation measures wall to
 handrail, which is narrower. Not checked at all: doors at landings,
 handrail extensions past the end steps, guard openings, gaps beside the
 stair, nosing materials and markings.
@@ -325,7 +328,8 @@ does not.
 | 2.31.0 | Toposolid kept within 0.5 m and compared vertex by vertex; too thin warned and caught | Not yet run in Revit |
 | 2.32.0 | Ground filter option for clouds with people, vehicles and plants | Not yet run in Revit |
 | 2.33.0 | Tools panel: Stair Check against Byggingarreglugerð 112/2012 | Found no stairs: every stair read as being edited |
-| 2.33.1 | Stair Check reads IsInEditMode as the method it is, and says what there is when it finds no stairs | Current |
+| 2.33.1 | Stair Check reads IsInEditMode as the method it is, and says what there is when it finds no stairs | Worked; report hard to read |
+| 2.33.2 | Stair Check report: summary table, then only the problems; separately drawn railings found | Current |
 
 ## Licence
 
