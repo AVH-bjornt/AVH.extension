@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.38.0.** The authoritative number is `__version__` in
+**Version 2.39.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -238,6 +238,18 @@ a name another view of the same type already has. Sheets are renamed by
 name; their numbers are left alone. Names can be swapped among the
 chosen. If Revit refuses any rename, nothing is renamed.
 
+**Batch Sheets.** Makes a number of sheets at once. A window asks for
+the title block (the one most used in the model is offered first, or
+none), how many sheets, and each sheet's number and name, built like
+Rename Views as a prefix, a field of each sheet's own and a suffix. The
+number fields count up from a start value (1, 01, 101 or A), and the
+start is offered where the model's own numbering leaves off: after A-105
+it offers A- and 106. Every field can still be edited per row. Each new
+number and name is shown as you type, in red with the reason if Revit
+would refuse it: a character Revit does not allow, a number another
+sheet already has, or two new sheets landing on one number. If Revit
+refuses any sheet, none are made.
+
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
 design option, category or subcategory hidden, explicitly hidden, a view
@@ -365,7 +377,8 @@ does not.
 | 2.35.0 | Tools panel: Align Views, by the top left of the crop region | Worked |
 | 2.36.0 | Worksets panel: Close Link Datums | Not yet run in Revit |
 | 2.37.0 | Tools panel: Rename Views, a shared prefix and suffix and a field of each one's own | Worked (one crash after committing, not reproduced) |
-| 2.38.0 | No files written on users' machines: Export Diagnostics removed, no trace or crash logs, temp files cleaned up | Current |
+| 2.38.0 | No files written on users' machines: Export Diagnostics removed, no trace or crash logs, temp files cleaned up | Not yet run in Revit |
+| 2.39.0 | Tools panel: Batch Sheets, numbered and named like Rename Views | Current |
 
 ## Licence
 
