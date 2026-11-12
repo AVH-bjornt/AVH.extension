@@ -2,7 +2,7 @@
 """Make a batch of sheets with one title block and numbered as you choose.
 
 A window asks for the title block, how many sheets, and each sheet's
-number and name, built the way Rename Views builds a name:
+number and name, built the way Rename Views/Sheets builds a name:
 
     number   prefix + field + suffix, the field counting up from a start
              value (1, 01, 101 or a letter) and editable per row

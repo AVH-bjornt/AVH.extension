@@ -35,7 +35,7 @@ uniqueness is per view type as the pre-check assumes. Revit refusing a
 name the pre-check let through is caught and rolls the run back.
 """
 
-__title__ = "Rename\nViews"
+__title__ = "Rename\nViews/Sheets"
 __author__ = "AVH"
 __doc__ = ("Rename chosen views and sheets: a shared prefix and suffix, "
            "and a field of their own for each.")

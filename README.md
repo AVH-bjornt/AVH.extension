@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.39.0.** The authoritative number is `__version__` in
+**Version 2.39.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -225,7 +225,7 @@ with the crop region off are skipped and listed. After moving, every
 corner is worked out again and compared; if any is more than 0.1 mm out,
 nothing is moved. Needs Revit 2023 or newer.
 
-**Rename Views.** Renames views and sheets together. Select them in the
+**Rename Views/Sheets.** Renames views and sheets together. Select them in the
 Project Browser (or tick them in a list if nothing is selected). A window
 shows each name split into a prefix and a suffix shared by all of them,
 and a field of each one's own between. The prefix and suffix start as
@@ -241,7 +241,7 @@ chosen. If Revit refuses any rename, nothing is renamed.
 **Batch Sheets.** Makes a number of sheets at once. A window asks for
 the title block (the one most used in the model is offered first, or
 none), how many sheets, and each sheet's number and name, built like
-Rename Views as a prefix, a field of each sheet's own and a suffix. The
+Rename Views/Sheets as a prefix, a field of each sheet's own and a suffix. The
 number fields count up from a start value (1, 01, 101 or A), and the
 start is offered where the model's own numbering leaves off: after A-105
 it offers A- and 106. Every field can still be edited per row. Each new
@@ -378,7 +378,8 @@ does not.
 | 2.36.0 | Worksets panel: Close Link Datums | Not yet run in Revit |
 | 2.37.0 | Tools panel: Rename Views, a shared prefix and suffix and a field of each one's own | Worked (one crash after committing, not reproduced) |
 | 2.38.0 | No files written on users' machines: Export Diagnostics removed, no trace or crash logs, temp files cleaned up | Not yet run in Revit |
-| 2.39.0 | Tools panel: Batch Sheets, numbered and named like Rename Views | Current |
+| 2.39.0 | Tools panel: Batch Sheets, numbered and named like Rename Views | Not yet run in Revit |
+| 2.39.1 | Rename Views button labelled Rename Views/Sheets | Current |
 
 ## Licence
 
