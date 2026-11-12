@@ -44,8 +44,7 @@ API methods", 2023).
 
 __title__ = "Align\nViews"
 __author__ = "AVH"
-__doc__ = ("Align views on other sheets to one view: the top left corner "
-           "of each crop region is moved onto the chosen view's.")
+__doc__ = "Align views on other sheets to one view: the top left corner of each crop region is moved onto the chosen view's."
 
 import os
 import sys

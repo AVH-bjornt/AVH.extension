@@ -37,9 +37,7 @@ not yet run in Revit. Three things are from the API documentation only:
 
 __title__ = "Close Link\nDatums"
 __author__ = "AVH"
-__doc__ = ("Close the Shared Views, Levels, Grids workset in the links you "
-           "pick, by reloading each one with that workset closed. Other "
-           "worksets in the link are left as they are.")
+__doc__ = "Close the Shared Views, Levels, Grids workset in the links you pick, by reloading each one with that workset closed. Other worksets in the link are left as they are."
 
 import os
 import sys

@@ -51,9 +51,7 @@ write cannot report success.
 
 __title__ = "Hide in\nTemplate"
 __author__ = "AVH"
-__doc__ = ("Hide or unhide the categories of the selected elements in "
-           "view templates you pick. Every view using a template "
-           "follows it.")
+__doc__ = "Hide or unhide the categories of the selected elements in view templates you pick. Every view using a template follows it."
 
 import os
 import sys

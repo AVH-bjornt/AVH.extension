@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.39.1.** The authoritative number is `__version__` in
+**Version 2.39.2.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -379,7 +379,8 @@ does not.
 | 2.37.0 | Tools panel: Rename Views, a shared prefix and suffix and a field of each one's own | Worked (one crash after committing, not reproduced) |
 | 2.38.0 | No files written on users' machines: Export Diagnostics removed, no trace or crash logs, temp files cleaned up | Not yet run in Revit |
 | 2.39.0 | Tools panel: Batch Sheets, numbered and named like Rename Views | Not yet run in Revit |
-| 2.39.1 | Rename Views button labelled Rename Views/Sheets | Current |
+| 2.39.1 | Rename Views button labelled Rename Views/Sheets | Worked |
+| 2.39.2 | Button tooltips shown in full: each `__doc__` one string, checked by test_button_tooltips.py | Current |
 
 ## Licence
 

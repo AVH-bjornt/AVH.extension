@@ -49,9 +49,7 @@ explains what is missing and stops.
 
 __title__ = "Place at\nCoordinate"
 __author__ = "AVH"
-__doc__ = ("Place an AVH marker at a typed survey coordinate, hosted on "
-           "the level below it, and check afterwards that it landed "
-           "where it was asked to.")
+__doc__ = "Place an AVH marker at a typed survey coordinate, hosted on the level below it, and check afterwards that it landed where it was asked to."
 
 import os
 import sys

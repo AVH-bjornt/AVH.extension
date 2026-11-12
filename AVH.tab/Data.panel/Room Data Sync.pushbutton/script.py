@@ -48,10 +48,7 @@ changed nothing, which would look like success.
 
 __title__ = "Room Data\nSync"
 __author__ = "AVH"
-__doc__ = ("Copy CCIMultiLevelLocationID from each room into "
-           "CCISingleLevelLocationAtID on the furniture, casework, "
-           "doors and equipment inside it. Prints a dry run and asks "
-           "before writing.")
+__doc__ = "Copy CCIMultiLevelLocationID from each room into CCISingleLevelLocationAtID on the furniture, casework, doors and equipment inside it. Prints a dry run and asks before writing."
 
 import os
 import sys

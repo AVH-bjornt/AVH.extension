@@ -42,9 +42,7 @@ status is checked, so a rejected write cannot report success.
 
 __title__ = "Isolate\nWarnings"
 __author__ = "AVH"
-__doc__ = ("Isolate every element Revit has a warning about, in the "
-           "active view. Click again to clear it. Shift click to pick "
-           "which kind of warning to isolate.")
+__doc__ = "Isolate every element Revit has a warning about, in the active view. Click again to clear it. Shift click to pick which kind of warning to isolate."
 
 import os
 import sys

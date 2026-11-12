@@ -62,8 +62,7 @@ and whether a toposolid's bounding box top is its highest point.
 
 __title__ = "Point Cloud\nto Toposolid"
 __author__ = "AVH"
-__doc__ = ("Build a toposolid from a linked point cloud, thinned to a grid "
-           "spacing you choose. Expects a cloud cleaned down to ground.")
+__doc__ = "Build a toposolid from a linked point cloud, thinned to a grid spacing you choose. Expects a cloud cleaned down to ground."
 
 import os
 import sys

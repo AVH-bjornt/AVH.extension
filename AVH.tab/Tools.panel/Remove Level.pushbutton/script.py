@@ -66,10 +66,7 @@ whether a level parameter found by the scan is always safe to write.
 
 __title__ = "Remove Level\n(BETA)"
 __author__ = "AVH"
-__doc__ = ("Move all elements off the levels you pick onto a target "
-           "level, keeping them at the same absolute elevation, then "
-           "offer to delete the emptied levels. Prints a dry run and "
-           "asks before writing anything.")
+__doc__ = "Move all elements off the levels you pick onto a target level, keeping them at the same absolute elevation, then offer to delete the emptied levels. Prints a dry run and asks before writing anything."
 
 import os
 import sys

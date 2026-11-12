@@ -23,9 +23,7 @@ shown.
 
 __title__ = "Flip\nGrid Ends"
 __author__ = "AVH"
-__doc__ = ("Flip visibility of the bubbles at the ends of selected grids. "
-           "If both bubbles were visible, only one is left. If one end was "
-           "visible, the visible end swaps to the other side.")
+__doc__ = "Flip visibility of the bubbles at the ends of selected grids. If both bubbles were visible, only one is left. If one end was visible, the visible end swaps to the other side."
 
 from pyrevit import revit, DB, forms, script
 from Autodesk.Revit import UI

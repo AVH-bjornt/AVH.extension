@@ -51,10 +51,7 @@ deliberately not touched, because nobody has asked for it.
 
 __title__ = "Make\nForma View"
 __author__ = "AVH"
-__doc__ = ("Create or refresh a 3D view named after the model, with "
-           "annotation, analytical and imported categories, linked "
-           "models, coordination models and lines switched off. Safe to "
-           "run again on the same model.")
+__doc__ = "Create or refresh a 3D view named after the model, with annotation, analytical and imported categories, linked models, coordination models and lines switched off. Safe to run again on the same model."
 
 import os
 import sys

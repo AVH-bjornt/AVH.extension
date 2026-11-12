@@ -57,9 +57,7 @@ than trusted.
 
 __title__ = "Sync Scope\nBoxes"
 __author__ = "AVH"
-__doc__ = ("Copy scope boxes in from a linked model, replace the ones "
-           "that changed there, and keep views and datums assigned to "
-           "them. You tick which ones.")
+__doc__ = "Copy scope boxes in from a linked model, replace the ones that changed there, and keep views and datums assigned to them. You tick which ones."
 
 import os
 import sys

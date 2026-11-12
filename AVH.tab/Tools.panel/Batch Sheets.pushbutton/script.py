@@ -33,8 +33,7 @@ check here ignores case, so it can only refuse more than Revit would.
 
 __title__ = "Batch\nSheets"
 __author__ = "AVH"
-__doc__ = ("Make a number of sheets at once with a chosen title block, "
-           "numbered and named as prefix + field + suffix.")
+__doc__ = "Make a number of sheets at once with a chosen title block, numbered and named as prefix + field + suffix."
 
 import os
 import sys

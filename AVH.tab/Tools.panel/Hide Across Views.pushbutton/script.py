@@ -45,8 +45,7 @@ rejected write cannot report success.
 
 __title__ = "Hide Across\nViews"
 __author__ = "AVH"
-__doc__ = ("Hide or unhide the selected elements in views you pick. "
-           "Shift click to work on their categories instead.")
+__doc__ = "Hide or unhide the selected elements in views you pick. Shift click to work on their categories instead."
 
 import os
 import sys

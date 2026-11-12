@@ -9,9 +9,7 @@ Naming convention:
 
 __title__ = "Create Worksets\nfrom Links"
 __author__ = "AVH"
-__doc__ = ("Creates a workset per linked model in the active project and "
-           "assigns the link instance and link type to it. "
-           "Naming: Link_RVT_<name> or Link_IFC_<name>.")
+__doc__ = "Creates a workset per linked model in the active project and assigns the link instance and link type to it. Naming: Link_RVT_<name> or Link_IFC_<name>."
 
 from pyrevit import revit, DB, forms, script
 

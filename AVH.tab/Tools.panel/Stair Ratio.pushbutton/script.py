@@ -27,9 +27,7 @@ ActualRisersNumber, used to compare the riser of each flight.
 """
 
 __author__ = "AVH"
-__doc__ = ("Check the rise and going of every stair: Byggingarreglugerd "
-           "6.4.9 and 6.4.10, or IST EN ISO 14122 for stairs set to "
-           "To_Machinery.")
+__doc__ = "Check the rise and going of every stair: Byggingarreglugerd 6.4.9 and 6.4.10, or IST EN ISO 14122 for stairs set to To_Machinery."
 
 import os
 import sys

@@ -40,9 +40,7 @@ cannot report success.
 
 __title__ = "Datums to\nWorkset"
 __author__ = "AVH"
-__doc__ = ("Put every grid and level into one workset, normally Shared "
-           "Views, Levels, Grids. Views are not touched: Revit does not "
-           "allow their workset to be changed.")
+__doc__ = "Put every grid and level into one workset, normally Shared Views, Levels, Grids. Views are not touched: Revit does not allow their workset to be changed."
 
 import os
 import sys

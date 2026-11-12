@@ -73,9 +73,7 @@ a live project, and the phase failure above is confirmed.
 
 __title__ = "Door Room\nCheck"
 __author__ = "AVH"
-__doc__ = ("Make a plan of one level with an arrow at every door "
-           "pointing into its ToRoom, room numbers on both sides, and "
-           "the problem doors in red. Rerun to refresh it.")
+__doc__ = "Make a plan of one level with an arrow at every door pointing into its ToRoom, room numbers on both sides, and the problem doors in red. Rerun to refresh it."
 
 import os
 import sys

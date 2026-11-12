@@ -36,9 +36,7 @@ fallback above depends on.
 
 __title__ = "Zoom to\nSelection"
 __author__ = "AVH"
-__doc__ = ("Zoom the active view to the current selection, with a "
-           "margin. Stays in the view you are in and changes nothing in "
-           "the model.")
+__doc__ = "Zoom the active view to the current selection, with a margin. Stays in the view you are in and changes nothing in the model."
 
 import os
 import sys

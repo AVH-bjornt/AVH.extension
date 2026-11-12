@@ -73,11 +73,7 @@ itself is confirmed: Bjorn hit it on a live project at 2.14.0.
 
 __title__ = "Flip\nStatus"
 __author__ = "AVH"
-__doc__ = ("Record mirrored, hand flipped and facing flipped state into "
-           "Area parameters on casework, doors, equipment, generic "
-           "models and windows, so they can be scheduled and filtered. "
-           "Handles grouped elements rather than walking into the "
-           "ungroup dialog.")
+__doc__ = "Record mirrored, hand flipped and facing flipped state into Area parameters on casework, doors, equipment, generic models and windows, so they can be scheduled and filtered. Handles grouped elements rather than walking into the ungroup dialog."
 
 import os
 import sys

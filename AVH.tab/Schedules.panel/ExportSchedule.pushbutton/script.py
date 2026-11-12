@@ -24,9 +24,7 @@ colleagues' machines, and since 2.38.0 it leaves no log files there.
 
 __title__ = "Export\nSchedule"
 __author__ = "AVH"
-__doc__ = ("Export the schedule view you currently have open to an AVH "
-           "styled Excel workbook, saved in a Schedules folder next to "
-           "the model.")
+__doc__ = "Export the schedule view you currently have open to an AVH styled Excel workbook, saved in a Schedules folder next to the model."
 
 import os
 import sys
