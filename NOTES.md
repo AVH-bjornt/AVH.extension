@@ -903,6 +903,7 @@ AVH.extension/
     model.py    bounding box arithmetic and margins, no Revit
   lib/avh_worksets/
     model.py    what moves, picker labels and the tally, no Revit
+    links.py    which link workset is the datum one, what stays open, no Revit
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
@@ -910,6 +911,7 @@ AVH.extension/
     Worksets.panel/
       Create Worksets From Links.pushbutton/
       Datums to Workset.pushbutton/
+      Close Link Datums.pushbutton/
     Tools.panel/
       Flip Grid Ends.pushbutton/
       Remove Level.pushbutton/
@@ -984,6 +986,7 @@ python test_flip_status_harness.py
 python test_door_room_check_harness.py
 python test_zoom_selection_harness.py
 python test_datums_workset_harness.py
+python test_close_link_datums_harness.py
 python test_hide_in_template_harness.py
 python test_hide_across_views_harness.py
 ```
@@ -1214,6 +1217,70 @@ One assertion in it was wrong in a way worth remembering: checking that
 the word `Views` never appears in the report failed, because the target
 workset is called Shared **Views**, Levels, Grids. It now matches the
 table row rather than the bare word.
+
+`test_close_link_datums_harness.py` runs the **real** Close Link Datums
+script against a mocked Revit, 74 checks. Its fake link type is
+behavioural: `LoadFrom` applies the `WorksetConfiguration` it is given to
+the link's worksets, so "every other workset stays as it was" is checked
+against what the configuration did. One fake link reports `LinkLoaded`
+and ignores the configuration, which is the only way the read back after
+the reload can be tested at all.
+
+Mutation tested. Opening every workset but the datum one, rather than
+what was open, fails 8 checks; skipping the read back 3; ignoring the
+`LoadResult` 1; dropping the external resource fallback 3; offering
+links where it is already closed 5; offering nested links 3.
+
+**It reports its own failures**, because its first real run will be on
+ACC links, where the reload is the least certain step. It keeps two
+files in Documents (or the user folder, or `%TEMP%`):
+`AVH_close_link_datums_trace.log`, started fresh on every click and
+appended as each stage *begins*, naming the link and the reload route;
+and `AVH_close_link_datums_crash.log`, with the traceback of anything
+that failed, including a `LoadFrom` that raised on one route before the
+next was tried. Links that will not list are reported as unreadable,
+never as "no links", and a picker that fails to open is reported, never
+treated as a cancel. The harness sends both files to a temporary folder,
+so running the tests writes nothing into Documents.
+
+**First live run, on a live project's ACC links:** no link offered a file
+path, the external resource route closed 5 of 6, and the sixth came
+back `LinkNotFound`. The link's own `Document.GetCloudModelPath()` is now
+tried after the external resource, read before any reload so that a
+refusal which unloads the link cannot take the path with it. A refused
+reload that leaves the link unloaded says so. **The cloud path did not
+fix the sixth link, and nothing in the tool could have**: it was linked
+from another ACC project that had not been bridged to this one, so
+Revit showed it as loaded but could not reach the model to reload it.
+Relinking it from within the project was the fix. `LinkNotFound` on a
+cloud link that Manage Links shows as loaded points at the link, not the
+tool. Removing the cloud route fails 5
+checks, and dropping the unloaded warning fails 1.
+
+**Second live run:** the cloud route raised too, and two reporting
+faults hid why. The report said only `path`, which was the .NET
+exception's short text; failures now carry the exception's full type and
+`Message` through `clsException`. And the crash log showed a `TypeError`
+from its own timestamp instead of the `LoadFrom` traceback. The timestamp
+used an `isoformat` argument that exists only on Python 3, and on Python
+2 `format_exc` reports the most recently handled exception, so the
+logger's own caught error replaced the one being logged. That bug was in
+the shared `crashlog.write` and would have hidden every schedule export
+crash the same way. It now takes the traceback first and uses
+`strftime`. Python 3 cannot reproduce the overwrite, so the harness checks
+the call order instead. Taking the traceback late again fails 1 check,
+and ignoring `clsException` fails 2.
+
+`crashlog.write` took a `name` argument for this. The schedule export
+still uses the default, `AVH_export_crash.log`.
+
+**Not yet run in Revit, and three things are from the API docs only**,
+all named in the script's docstring: that a cloud link's
+`GetExternalFileReference().GetPath()` is a path `LoadFrom` accepts,
+that `Workset.IsOpen` on a linked document reflects what the link was
+loaded with, and that a `WorksetId` read from the loaded link is valid
+in a configuration for its file. The report names which route each link
+was reloaded by, so the first real run on ACC links answers the first.
 
 One scenario in it is a reconstruction of the first real run: a single
 railing buried in twenty pieces of view infrastructure. Before the

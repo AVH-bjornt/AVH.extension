@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.35.0.** The authoritative number is `__version__` in
+**Version 2.36.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -78,6 +78,19 @@ the usual one, but the list is whatever the model has. Anything already
 there is left alone, and anything checked out by somebody else is
 skipped and named rather than attempted. Views are not included: Revit
 does not allow a view's workset to be changed.
+
+**Close Link Datums.** Tick the links you want and `Shared Views,
+Levels, Grids` is closed in each, so their grids and levels stop showing
+in this model. `Shared Levels and Grids` is recognised too. Each link is
+reloaded with that one workset closed; every other workset in it stays
+open or closed as it was. Links where it is already closed, links
+without it, unloaded, nested and non workshared links are not offered,
+and the output window says which and why. After each reload the link's
+worksets are read back from Revit, so a reload that left the workset
+open is reported as exactly that. Reloading takes as long as Manage
+Links does, so large links take a while. If anything fails,
+`AVH_close_link_datums_trace.log` and `AVH_close_link_datums_crash.log`
+in Documents say which link, which step and why.
 
 ### Tools
 
@@ -341,7 +354,8 @@ does not.
 | 2.33.1 | Stair Check reads IsInEditMode as the method it is, and says what there is when it finds no stairs | Worked; report hard to read |
 | 2.33.2 | Stair Check report: summary table, then only the problems; separately drawn railings found | Not yet run in Revit |
 | 2.34.0 | Stair Check becomes Gönguhlutfall stiga: rise and going only; To_Machinery checked against ÍST EN ISO 14122 | Not yet run in Revit |
-| 2.35.0 | Tools panel: Align Views, by the top left of the crop region | Current |
+| 2.35.0 | Tools panel: Align Views, by the top left of the crop region | Worked |
+| 2.36.0 | Worksets panel: Close Link Datums | Not yet run in Revit |
 
 ## Licence
 

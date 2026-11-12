@@ -89,20 +89,32 @@ def environment():
     return "\n".join(lines)
 
 
-def write(stage, script_name, extra_dir=None, note=None):
+def write(stage, script_name, extra_dir=None, note=None, name=LOG_NAME):
     """Append a crash record. Returns the path written, or None.
 
     Call this from an `except BaseException` block. It captures whatever
-    exception is currently being handled.
+    exception is currently being handled. `name` lets a tool other than
+    the schedule export keep its own log file.
     """
+    # The traceback is taken first, before anything here can raise. On
+    # Python 2 format_exc reports the most recently *handled* exception,
+    # so any error caught below would replace the one being logged. That
+    # happened on a live run: the old timestamp used an isoformat argument
+    # that is Python 3 only, and the log showed its TypeError instead of
+    # the LoadFrom failure.
     try:
-        path = log_path(extra_dir)
+        captured = traceback.format_exc()
+    except Exception:
+        captured = "  <traceback unavailable>"
+
+    try:
+        path = log_path(extra_dir, name)
         if not path:
             return None
 
         try:
-            stamp = __import__("datetime").datetime.now().isoformat(
-                sep=" ", timespec="seconds")
+            stamp = __import__("datetime").datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S")
         except Exception:
             stamp = "(no timestamp)"
 
@@ -119,10 +131,7 @@ def write(stage, script_name, extra_dir=None, note=None):
         body.append(environment())
         body.append("")
         body.append("traceback:")
-        try:
-            body.append(traceback.format_exc())
-        except Exception:
-            body.append("  <traceback unavailable>")
+        body.append(captured)
 
         text = "\n".join(body)
 
