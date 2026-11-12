@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.36.0.** The authoritative number is `__version__` in
+**Version 2.37.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -230,6 +230,19 @@ with the crop region off are skipped and listed. After moving, every
 corner is worked out again and compared; if any is more than 0.1 mm out,
 nothing is moved. Needs Revit 2023 or newer.
 
+**Rename Views.** Renames views and sheets together. Select them in the
+Project Browser (or tick them in a list if nothing is selected). A window
+shows each name split into a prefix and a suffix shared by all of them,
+and a field of each one's own between. The prefix and suffix start as
+whatever the chosen names already have in common, so changing the prefix
+changes every name while each keeps its own field; the fields can be
+edited one by one, or numbered from 1, 01, 101 or A. Each new name is
+shown as you type, in red with the reason if Revit would refuse it: a
+character Revit does not allow, two chosen views landing on one name, or
+a name another view of the same type already has. Sheets are renamed by
+name; their numbers are left alone. Names can be swapped among the
+chosen. If Revit refuses any rename, nothing is renamed.
+
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
 design option, category or subcategory hidden, explicitly hidden, a view
@@ -356,6 +369,7 @@ does not.
 | 2.34.0 | Stair Check becomes Gönguhlutfall stiga: rise and going only; To_Machinery checked against ÍST EN ISO 14122 | Not yet run in Revit |
 | 2.35.0 | Tools panel: Align Views, by the top left of the crop region | Worked |
 | 2.36.0 | Worksets panel: Close Link Datums | Not yet run in Revit |
+| 2.37.0 | Tools panel: Rename Views, a shared prefix and suffix and a field of each one's own | Current |
 
 ## Licence
 
