@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.34.0.** The authoritative number is `__version__` in
+**Version 2.35.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -205,6 +205,18 @@ The ISO 14122 standards are licensed to AVH for one workstation and are
 not part of this extension; the code cites clause numbers and figures
 only.
 
+**Align Views.** Lines up views on different sheets. Select a
+viewport on a sheet (or pick a placed view from a list if nothing is
+selected), then tick the views to line up with it. Each ticked viewport
+is moved on its sheet so that the top left corner of its view's crop
+region lands exactly where the chosen view's does. The crop region is
+used rather than the viewport box, because tags and dimensions reaching
+past the crop make the box bigger. Views split into several crop regions
+use the top left of all of them together. Pinned viewports and views
+with the crop region off are skipped and listed. After moving, every
+corner is worked out again and compared; if any is more than 0.1 mm out,
+nothing is moved. Needs Revit 2023 or newer.
+
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
 design option, category or subcategory hidden, explicitly hidden, a view
@@ -328,7 +340,8 @@ does not.
 | 2.33.0 | Tools panel: Stair Check against Byggingarreglugerð 112/2012 | Found no stairs: every stair read as being edited |
 | 2.33.1 | Stair Check reads IsInEditMode as the method it is, and says what there is when it finds no stairs | Worked; report hard to read |
 | 2.33.2 | Stair Check report: summary table, then only the problems; separately drawn railings found | Not yet run in Revit |
-| 2.34.0 | Stair Check becomes Gönguhlutfall stiga: rise and going only; To_Machinery checked against ÍST EN ISO 14122 | Current |
+| 2.34.0 | Stair Check becomes Gönguhlutfall stiga: rise and going only; To_Machinery checked against ÍST EN ISO 14122 | Not yet run in Revit |
+| 2.35.0 | Tools panel: Align Views, by the top left of the crop region | Current |
 
 ## Licence
 
