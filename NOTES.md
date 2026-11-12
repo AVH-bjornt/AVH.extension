@@ -102,23 +102,13 @@ when done. If the model has no local path it falls back to Documents.
 If the picker is unavailable for any reason it silently falls back to
 exporting the schedule view you currently have open, so a UI problem can
 never cost you the export. One schedule failing never stops the others:
-its traceback goes to the crash log and the rest still export.
+its traceback goes to the pyRevit output window and the rest still
+export.
 
-**AVH > Schedules > Export Diagnostics**
-
-Run this if anything fails. It tests each layer independently and writes
-`AVH_export_diagnostics.txt` beside the model.
-
-It is a schedule tool only. It knows nothing about the Worksets panel.
-
-It is not needed for day to day work. Its value is on a *new* machine or
-after a Revit or pyRevit upgrade, because the failures that cost this
-build five releases were all environment specific and would recur on a
-different install. It is the cheapest way to tell a colleague's broken
-setup apart from a broken script. If you would rather not have it on the
-ribbon, delete
-`AVH.tab/Schedules.panel/Diagnostics.pushbutton/` and reload; nothing
-else depends on it.
+Export Diagnostics, a button that probed each layer and wrote
+`AVH_export_diagnostics.txt`, was removed in 2.38.0 (see "No files on
+users' machines" below). It is in the git history if a new machine ever
+needs it again.
 
 **AVH > Worksets > Create Worksets from Links**
 
@@ -863,13 +853,31 @@ makes the parsing testable outside Revit.
 
 ## If something fails
 
-Three files, all written to Documents, your user folder and `%TEMP%`:
+The failure dialog names the stage it reached, and the full traceback is
+in the pyRevit output window. Nothing is written to disk.
 
-- **`AVH_export_trace.log`** one line per stage, appended as each stage
-  *begins*. Absent means nothing ran; stopping partway shows where it died.
-- **`AVH_export_crash.log`** full traceback plus Python, .NET and Revit
-  versions.
-- **`AVH_export_diagnostics.txt`** from the Diagnostics button.
+## No files on users' machines
+
+Since 2.38.0 no button writes a log, trace or report file. The extension
+is shared with colleagues, and files appearing in their Documents and
+`%TEMP%` folders were not wanted. Until then Export Schedule and Close
+Link Datums kept a stage trace and a crash log in Documents, the
+Diagnostics button wrote a report, and `lib/avh_schedules/crashlog.py`
+did the writing. All of that is gone; errors go to the output window.
+
+Two files Revit itself needs are still made, and now cleaned up: the
+schedule export `ViewSchedule.Export` writes (an `avh_sched_*` folder in
+`%TEMP%`, removed after reading, even when the export fails), and Stair
+Ratio's temporary shared parameter file (removed once the user's own is
+restored). The Export Schedule, Close Link Datums and Stair Ratio
+harnesses each check that nothing is left in the home folder or TEMP.
+
+The trade-off: a run torn down without unwinding, which the append-as-
+you-go trace was built to catch, now leaves nothing behind. If that kind
+of failure comes back, the Revit journal
+(`%LOCALAPPDATA%\Autodesk\Revit\Autodesk Revit 20xx\Journals`) and the
+Windows Application event log (".NET Runtime" and "Application Error")
+still record it, without the extension writing anything.
 
 ## Layout
 
@@ -884,7 +892,6 @@ AVH.extension/
     xlsx.py     minimal OOXML writer, stdlib only
     style.py    the AVH house style
     writer.py   ScheduleTable -> styled .xlsx
-    crashlog.py crash logging that cannot itself fail
   lib/avh_levels/
     model.py    level move arithmetic and classification, no Revit
   lib/avh_rooms/
@@ -907,7 +914,6 @@ AVH.extension/
   AVH.tab/
     Schedules.panel/
       ExportSchedule.pushbutton/
-      Diagnostics.pushbutton/
     Worksets.panel/
       Create Worksets From Links.pushbutton/
       Datums to Workset.pushbutton/
@@ -1232,16 +1238,13 @@ what was open, fails 8 checks; skipping the read back 3; ignoring the
 links where it is already closed 5; offering nested links 3.
 
 **It reports its own failures**, because its first real run will be on
-ACC links, where the reload is the least certain step. It keeps two
-files in Documents (or the user folder, or `%TEMP%`):
-`AVH_close_link_datums_trace.log`, started fresh on every click and
-appended as each stage *begins*, naming the link and the reload route;
-and `AVH_close_link_datums_crash.log`, with the traceback of anything
-that failed, including a `LoadFrom` that raised on one route before the
-next was tried. Links that will not list are reported as unreadable,
-never as "no links", and a picker that fails to open is reported, never
-treated as a cancel. The harness sends both files to a temporary folder,
-so running the tests writes nothing into Documents.
+ACC links, where the reload is the least certain step. Anything that
+fails, including a `LoadFrom` that raised on one route before the next
+was tried, goes to the output window with the link, the route and the
+traceback. (Until 2.38.0 it also kept a trace and a crash log in
+Documents.) Links that will not list are reported as unreadable, never
+as "no links", and a picker that fails to open is reported, never
+treated as a cancel.
 
 **First live run, on a live project's ACC links:** no link offered a file
 path, the external resource route closed 5 of 6, and the sixth came
@@ -1719,7 +1722,8 @@ Two rules earned the hard way.
 **Probe the environment before building on it.** Four failures were all
 runtime environment assumptions, not logic errors: an engine that will not
 start, a UI module that will not import, a serialiser disabled by default.
-None were visible from reading code. Use the Diagnostics button first.
+None were visible from reading code. (A Diagnostics button did this
+until 2.38.0; it is in the git history.)
 
 **Test the script layer, not just the library.** Every failure happened in
 the thin pushbutton scripts, which had no tests for three releases while

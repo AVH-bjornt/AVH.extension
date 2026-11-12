@@ -15,11 +15,11 @@ No UI framework either: pyrevit.forms cannot load on CPython, WinForms
 failed with 'Invalid BinaryFormatter stream'. The only dialog is
 Autodesk.Revit.UI.TaskDialog, and even that is treated as optional.
 
-Everything below sits inside one outer harness that writes a full
-traceback to AVH_export_crash.log on any failure, including a failure
-during imports, and records how far execution got. Three failures in a
-row have been diagnosed only from a Revit dialog with its detail pane cut
-off; that is not a workable feedback loop.
+Everything below sits inside one outer handler that, on any failure,
+including a failure during imports, says how far execution got and
+prints the full traceback to the pyRevit output window. Nothing is
+written to disk apart from the workbooks themselves: the button runs on
+colleagues' machines, and since 2.38.0 it leaves no log files there.
 """
 
 __title__ = "Export\nSchedule"
@@ -32,93 +32,42 @@ import os
 import sys
 import traceback
 
-SCRIPT = "ExportSchedule"
-_crashlog = None
-
-# --- breadcrumb trace --------------------------------------------------
+# --- stage tracking ---------------------------------------------------
 #
-# Written with nothing but os, immediately, appending one line per stage.
-# v1.0.3 wrapped every line and still produced a Revit level error with no
-# crash log at all, which leaves two possibilities: the script never ran,
-# or it died in a way Python could not catch. A crash log written in an
-# except block cannot distinguish those. An append-as-you-go trace can:
-# if the file does not exist, nothing ran; if it stops at a stage, that
-# stage is where it died, even if the process was torn down without
-# unwinding.
+# STAGE names the step in progress, so a failure can say where it was.
+# Until 2.38.0 each stage was also appended to AVH_export_trace.log in
+# Documents; now it only goes to the output window.
 
-_TRACE_PATH = None
-
-
-def _trace_targets():
-    out = []
-    try:
-        home = os.path.expanduser("~")
-        out.append(os.path.join(home, "Documents"))
-        out.append(home)
-    except Exception:
-        pass
-    for key in ("TEMP", "TMP"):
-        value = os.environ.get(key)
-        if value:
-            out.append(value)
-    return out
-
-
-def _trace_init():
-    global _TRACE_PATH
-    for directory in _trace_targets():
-        try:
-            if os.path.isdir(directory):
-                _TRACE_PATH = os.path.join(directory, "AVH_export_trace.log")
-                import io
-                with io.open(_TRACE_PATH, "w", encoding="utf-8",
-                             errors="replace") as handle:
-                    handle.write(u"AVH {0} trace\n".format(SCRIPT))
-                return _TRACE_PATH
-        except Exception:
-            continue
-    return None
+STAGE = "bootstrap"
 
 
 def trace(stage):
-    """Record a stage. Also updates STAGE for the crash logger."""
+    """Record the stage in progress."""
     global STAGE
     STAGE = stage
-    if _TRACE_PATH:
-        try:
-            import io
-            with io.open(_TRACE_PATH, "a", encoding="utf-8",
-                         errors="replace") as handle:
-                handle.write(u"  {0}\n".format(stage))
-        except Exception:
-            pass
     try:
         print("[AVH] " + stage)
     except Exception:
         pass
 
 
-STAGE = "bootstrap"
-_trace_init()
 trace("script entered, stdlib imported")
 
 
-def _fallback_log(text):
-    """Last resort if even crashlog could not be imported."""
-    for base in (os.path.join(os.path.expanduser("~"), "Documents"),
-                 os.path.expanduser("~"), os.environ.get("TEMP", "")):
-        try:
-            if base and os.path.isdir(base):
-                import io
-                with io.open(os.path.join(base, "AVH_export_crash.log"),
-                             "a", encoding="utf-8",
-                             errors="replace") as handle:
-                    handle.write(u"\n" + u"=" * 72 + u"\n")
-                    handle.write(u"{0} (fallback logger)\nstage: {1}\n\n"
-                                 u"{2}\n".format(SCRIPT, STAGE, text))
-                return
-        except Exception:
-            continue
+def show_traceback(heading):
+    """Print the exception being handled to the output window."""
+    try:
+        print("\n[AVH] " + heading)
+        print(traceback.format_exc())
+    except Exception:
+        pass
+
+
+def last_line_of_traceback():
+    try:
+        return traceback.format_exc().strip().splitlines()[-1]
+    except Exception:
+        return ""
 
 
 def _tell(title, instruction, content=""):
@@ -309,8 +258,7 @@ def run():
     if doc is None:
         _tell("AVH", "Could not reach Revit.",
               "None of the known ways to reach the active document worked.\n"
-              "Tried: {0}\n\nRun Export Diagnostics and send the "
-              "report.".format(source))
+              "Tried: {0}".format(source))
         return
     trace("Revit host resolved via {0}".format(source))
 
@@ -336,12 +284,9 @@ def run():
             written.append((name, path, table))
         except BaseException as exc:
             # One bad schedule must not lose the others. Its traceback goes
-            # to the crash log; the run carries on.
+            # to the output window; the run carries on.
             trace("FAILED on '{0}': {1}".format(name, type(exc).__name__))
-            if _crashlog is not None:
-                _crashlog.write("export '{0}'".format(name), SCRIPT)
-            else:
-                _fallback_log(traceback.format_exc())
+            show_traceback("export '{0}' failed:".format(name))
             failed.append((name, exc))
 
     trace("report: {0} written, {1} failed".format(len(written), len(failed)))
@@ -414,7 +359,7 @@ def report(written, failed, target_dir):
         for name, exc in failed:
             lines.append(u"  {0}: {1}".format(name, exc))
         lines.append(u"")
-        lines.append(u"Tracebacks are in AVH_export_crash.log.")
+        lines.append(u"The full errors are in the pyRevit output window.")
     if not lines:
         lines.append(u"Nothing exported.")
 
@@ -429,27 +374,9 @@ def report(written, failed, target_dir):
 
 
 try:
-    trace("import crashlog")
-    _ext = os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))))
-    _lib = os.path.join(_ext, "lib")
-    if _lib not in sys.path:
-        sys.path.insert(0, _lib)
-    from avh_schedules import crashlog as _crashlog
-except BaseException:
-    _crashlog = None
-
-try:
     run()
 except BaseException:
-    written = None
-    if _crashlog is not None:
-        written = _crashlog.write(STAGE, SCRIPT)
-    if written is None:
-        _fallback_log(traceback.format_exc())
-        written = "your Documents folder"
-    trace("FAILED at the stage above")
+    show_traceback("FAILED at: " + STAGE)
     _tell("AVH", "Export failed.",
-          "Stage reached: {0}\n\nTraceback written to:\n{1}\n"
-          "Stage trace written to:\n{2}\n\nSend both files back."
-          .format(STAGE, written, _TRACE_PATH or "(could not write)"))
+          "Stage reached: {0}\n\n{1}\n\nThe full error is in the pyRevit "
+          "output window.".format(STAGE, last_line_of_traceback()))

@@ -59,46 +59,33 @@ if _LIB_DIR not in sys.path:
 from pyrevit import revit, DB, forms, script      # noqa: E402
 from avh_worksets import links                    # noqa: E402
 from avh_schedules.compat import to_text          # noqa: E402
-from avh_schedules import crashlog                # noqa: E402
 
 output = script.get_output()
 logger = script.get_logger()
 
 TITLE = u"Close Link Datums"
-SCRIPT = "Close Link Datums"
-TRACE_NAME = "AVH_close_link_datums_trace.log"
-CRASH_NAME = "AVH_close_link_datums_crash.log"
 
-# The reload is the one step that cannot be tried outside Revit, and on a
-# cloud link it is the most likely to fail. The trace is written as each
-# stage *begins*, so a run torn down inside LoadFrom still says which link
-# and which route it was on. It is started fresh on every click.
+# STAGE names the step in progress, so a failure can say where it was.
+# Until 2.38.0 each stage also went to a trace file in Documents and each
+# error to a crash log there; the button now writes no files, and errors
+# go to the output window.
 STAGE = u"start"
-_trace_started = [False]
 
 
 def trace(stage):
     global STAGE
     STAGE = stage
-    try:
-        import io
-        path = crashlog.log_path(name=TRACE_NAME)
-        if not path:
-            return
-        mode = "a" if _trace_started[0] else "w"
-        _trace_started[0] = True
-        with io.open(path, mode, encoding="utf-8", errors="replace") as handle:
-            handle.write(to_text(stage) + u"\n")
-    except BaseException:
-        pass          # a logger must never be the thing that fails
 
 
-def log_crash(note=None):
-    """Write the current exception to the crash log. Returns the path."""
+def show_error(note):
+    """Print the exception being handled to the output window."""
     try:
-        return crashlog.write(STAGE, SCRIPT, note=note, name=CRASH_NAME)
+        import traceback
+        output.print_md(u"**{0}** failed at {1}".format(
+            to_text(note), to_text(STAGE)))
+        output.print_code(to_text(traceback.format_exc()))
     except BaseException:
-        return None
+        pass          # reporting an error must never raise another
 
 
 def safe(call, default=None):
@@ -204,7 +191,7 @@ def collect_links(doc):
         link_types = list(DB.FilteredElementCollector(doc).OfClass(
             DB.RevitLinkType))
     except BaseException:
-        log_crash(u"listing link types")
+        show_error(u"listing link types")
         return None
     found = []
     for link_type in link_types:
@@ -213,7 +200,7 @@ def collect_links(doc):
         try:
             found.append(read_link(doc, link_type))
         except BaseException:
-            log_crash(u"reading link " + name)
+            show_error(u"reading link " + name)
             found.append(links.LinkInfo(name, worksets=None,
                                         handle=link_type))
     found.sort(key=lambda link: link.name.lower())
@@ -312,7 +299,7 @@ def close_in(doc, link):
         try:
             result = link.handle.LoadFrom(path, config)
         except BaseException as exc:
-            log_crash(u"LoadFrom on {0} by {1}".format(link.name, label))
+            show_error(u"LoadFrom on {0} by {1}".format(link.name, label))
             errors.append(u"{0}: {1}".format(label, describe(exc)))
             continue
         trace(u"read back " + link.name)
@@ -352,7 +339,7 @@ def pick(candidates):
                           u"links?",
             button_name="Close it in these links")
     except BaseException:
-        log_crash(u"picker")
+        show_error(u"picker")
         return None
     if not chosen:
         return []
@@ -398,7 +385,7 @@ def run():
     if found is None:
         forms.alert(
             u"The links in this model could not be read, so nothing was "
-            u"changed. Details are in {0}.".format(CRASH_NAME),
+            u"changed. The output window has the details.",
             title=TITLE)
         return
     if not found:
@@ -426,7 +413,7 @@ def run():
     if chosen is None:
         forms.alert(
             u"The link picker failed to open, so nothing was changed. "
-            u"Details are in {0}.".format(CRASH_NAME),
+            u"The output window has the details.",
             title=TITLE)
         return
     if not chosen:
@@ -438,7 +425,7 @@ def run():
         try:
             outcome, detail, route = close_in(doc, link)
         except BaseException as exc:
-            log_crash(u"closing in " + link.name)
+            show_error(u"closing in " + link.name)
             outcome, detail, route = links.RELOAD_FAILED, describe(exc), u""
         results.append((link, outcome, detail, route))
     progress(len(chosen), len(chosen))
@@ -459,11 +446,11 @@ def main():
         run()
         trace(u"done")
     except BaseException:
-        path = log_crash(u"unhandled")
+        show_error(u"Close Link Datums")
         try:
             forms.alert(
-                u"Close Link Datums stopped at: {0}\n\nThe details are in "
-                u"{1}".format(STAGE, path or CRASH_NAME),
+                u"Close Link Datums stopped at: {0}\n\nThe output window "
+                u"has the details.".format(STAGE),
                 title=TITLE)
         except BaseException:
             pass

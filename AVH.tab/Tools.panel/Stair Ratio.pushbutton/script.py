@@ -200,6 +200,13 @@ def add_parameter(doc):
                 app.SharedParametersFilename = original
         except BaseException:
             pass
+        # The file only exists for Revit to read the definition from;
+        # nothing is left behind in %TEMP%.
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except BaseException:
+            pass
 
 
 def level_of(doc, stair):

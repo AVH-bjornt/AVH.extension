@@ -24,6 +24,7 @@ Run outside Revit:
 
 import math
 import os
+import tempfile
 import runpy
 import sys
 import types
@@ -689,6 +690,9 @@ check("parameter: offered and bound with AVH's GUID",
       u"guid:f03e1b0f-96ae-4317-ba74-010f759f77eb")
 check("parameter: the user's shared parameter file is put back",
       doc.Application.SharedParametersFilename == u"C:\\AVH\\shared.txt")
+check("parameter: the temporary parameter file is not left in TEMP",
+      not os.path.exists(os.path.join(tempfile.gettempdir(),
+                                      "AVH_Stair_Use_params.txt")))
 check("classify: To_Machinery is offered",
       any(u"To_Machinery  -  " in item for title, items in rec.pickers
           for item in items))

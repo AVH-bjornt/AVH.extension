@@ -26,6 +26,7 @@ reconstruction is verified against the real door schedules in tests.
 """
 
 import os
+import shutil
 import tempfile
 
 from .compat import is_number_text, read_text, to_text
@@ -275,10 +276,15 @@ def export_schedule_text(view_schedule, delimiter=TAB):
     except Exception:
         pass
 
-    view_schedule.Export(temp_dir, file_name, options)
-    path = os.path.join(temp_dir, file_name)
-    # Revit's export encoding varies by version, so try in order.
-    return read_text(path)
+    try:
+        view_schedule.Export(temp_dir, file_name, options)
+        path = os.path.join(temp_dir, file_name)
+        # Revit's export encoding varies by version, so try in order.
+        return read_text(path)
+    finally:
+        # Nothing is left behind in %TEMP% (until 2.38.0 every export
+        # left an avh_sched_* folder there).
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def _no_text_qualifier():

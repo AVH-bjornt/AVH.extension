@@ -3,14 +3,18 @@
 Run the real ExportSchedule script against a mocked Revit.
 
 This is the test that was missing for three releases. The script's own
-control flow, its stage tracking and its crash logging were never
-exercised, only the library underneath them. Here a fake ViewSchedule
+control flow and its failure reporting were never exercised, only the
+library underneath them. Here a fake ViewSchedule
 serves the real CC01 room schedule through ViewSchedule.Export, so the
 whole path from button click to finished workbook runs.
 
 Four scenarios: the happy path, a failure inside the schedule read, a
 TaskDialog that raises (it is under suspicion after the
 NullReferenceException), and no schedule view open.
+
+Since 2.38.0 the button writes nothing but the workbooks: no stage trace,
+no crash log, and no schedule export left in TEMP. Each run gets its own
+home folder and TEMP, and every scenario checks both are still empty.
 """
 
 import os
@@ -135,19 +139,36 @@ def run_script(active_view, model_path, home):
     TaskDialogSpy.shown = []
     uiapp = install_revit(active_view, model_path)
 
-    os.environ["HOME"] = home
-    os.environ["USERPROFILE"] = home
-    docs = os.path.join(home, "Documents")
-    if not os.path.isdir(docs):
-        os.makedirs(docs)
-
+    sandbox(home)
     for mod in [m for m in sys.modules
                 if m.startswith("avh_schedules")]:
         del sys.modules[mod]
 
     runpy.run_path(SCRIPT, init_globals={"__revit__": uiapp},
                    run_name="__main__")
-    return docs
+    return os.path.join(home, "Documents")
+
+
+def sandbox(home):
+    """Point the home folder and TEMP at `home`, empty."""
+    os.environ["HOME"] = home
+    os.environ["USERPROFILE"] = home
+    for sub in ("Documents", "Temp"):
+        path = os.path.join(home, sub)
+        if not os.path.isdir(path):
+            os.makedirs(path)
+    os.environ["TEMP"] = os.environ["TMP"] = os.path.join(home, "Temp")
+    tempfile.tempdir = os.path.join(home, "Temp")
+
+
+def left_behind(home):
+    """Every file the run left in the home folder or TEMP."""
+    found = []
+    for root, dirs, files in os.walk(home):
+        found.extend(os.path.join(root, f) for f in files)
+        found.extend(os.path.join(root, d) for d in dirs
+                     if d.startswith("avh_sched_"))
+    return found
 
 
 # --- 1. happy path -----------------------------------------------------
@@ -168,22 +189,8 @@ check("happy path writes workbook beside the model", os.path.exists(expected),
 check("happy path shows a success dialog",
       TaskDialogSpy.shown and "Exported" in TaskDialogSpy.shown[-1][0],
       str(TaskDialogSpy.shown))
-check("no crash log on the happy path",
-      not os.path.exists(os.path.join(home1, "Documents",
-                                      "AVH_export_crash.log")))
-
-trace1 = os.path.join(home1, "Documents", "AVH_export_trace.log")
-check("happy path writes a stage trace", os.path.exists(trace1))
-if os.path.exists(trace1):
-    t = open(trace1, encoding="utf-8").read()
-    check("trace records the first stage",
-          "script entered" in t, t[:200])
-    check("trace records the schedule read",
-          "via ViewSchedule.Export" in t, t[:400])
-    check("trace names how the host was resolved",
-          "Revit host resolved via" in t, t[:400])
-    check("trace records successful completion",
-          "finished" in t and "FAILED" not in t, t[:600])
+check("happy path leaves no file in the home folder or TEMP",
+      not left_behind(home1), str(left_behind(home1)))
 
 if os.path.exists(expected):
     from openpyxl import load_workbook
@@ -202,23 +209,16 @@ home2 = tempfile.mkdtemp(prefix="avh_home2_")
 bad = ViewSchedule("Broken Schedule", fail=True)
 run_script(bad, model, home2)
 
-crash = os.path.join(home2, "Documents", "AVH_export_crash.log")
-check("read failure writes a crash log", os.path.exists(crash))
-if os.path.exists(crash):
-    body = open(crash, encoding="utf-8").read()
-    check("crash log names the failing schedule",
-          "export 'Broken Schedule'" in body, body[:400])
-    check("crash log contains the real error",
-          "Object reference not set" in body)
-    check("crash log has a traceback", "Traceback" in body)
-trace2 = os.path.join(home2, "Documents", "AVH_export_trace.log")
-check("failed run writes a stage trace", os.path.exists(trace2))
-if os.path.exists(trace2):
-    t2 = open(trace2, encoding="utf-8").read()
-    check("trace shows which schedule failed",
-          "FAILED on 'Broken Schedule'" in t2, t2[:600])
-    check("a failed schedule still reaches the report stage",
-          "report:" in t2, t2[:600])
+check("read failure leaves no file in the home folder or TEMP",
+      not left_behind(home2), str(left_behind(home2)))
+check("read failure names the schedule and the error",
+      TaskDialogSpy.shown
+      and "Broken Schedule" in TaskDialogSpy.shown[-1][1]
+      and "Object reference not set" in TaskDialogSpy.shown[-1][1],
+      str(TaskDialogSpy.shown))
+check("read failure points to the output window, not a file",
+      TaskDialogSpy.shown and "output window" in TaskDialogSpy.shown[-1][1],
+      str(TaskDialogSpy.shown))
 
 check("read failure still reports to the user",
       TaskDialogSpy.shown and "failed" in TaskDialogSpy.shown[-1][0].lower(),
@@ -251,9 +251,8 @@ check("non schedule view is told to open a schedule",
       TaskDialogSpy.shown
       and "schedule" in TaskDialogSpy.shown[-1][0].lower(),
       str(TaskDialogSpy.shown))
-check("non schedule view writes no crash log",
-      not os.path.exists(os.path.join(home4, "Documents",
-                                      "AVH_export_crash.log")))
+check("non schedule view leaves no file behind",
+      not left_behind(home4), str(left_behind(home4)))
 
 # --- 5. several schedules, one of them broken --------------------------
 #
@@ -274,11 +273,7 @@ def run_with_schedules(views, home):
     """Exec the script without its runner, patch the picker, call run()."""
     TaskDialogSpy.shown = []
     uiapp = install_revit(views[0], model)
-    os.environ["HOME"] = home
-    os.environ["USERPROFILE"] = home
-    docs = os.path.join(home, "Documents")
-    if not os.path.isdir(docs):
-        os.makedirs(docs)
+    sandbox(home)
     for mod in [m for m in sys.modules if m.startswith("avh_schedules")]:
         del sys.modules[mod]
 
@@ -307,11 +302,8 @@ check("report names both the successes and the failure",
       and "Good One" in TaskDialogSpy.shown[-1][1]
       and "Bad One" in TaskDialogSpy.shown[-1][1],
       str(TaskDialogSpy.shown[-1] if TaskDialogSpy.shown else None))
-trace5 = os.path.join(home5, "Documents", "AVH_export_trace.log")
-if os.path.exists(trace5):
-    t5 = open(trace5, encoding="utf-8").read()
-    check("trace records 2 written, 1 failed",
-          "report: 2 written, 1 failed" in t5, t5[-400:])
+check("a mixed batch leaves no file in the home folder or TEMP",
+      not left_behind(home5), str(left_behind(home5)))
 
 
 # --- 6. the resolver reports what it tried when nothing works ----------

@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.37.0.** The authoritative number is `__version__` in
+**Version 2.38.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -58,12 +58,8 @@ installed.
 which opens when it finishes. Calibri, `#195784` headers, the AVH logo,
 grouping taken from each schedule's own Revit sort and group settings,
 quantities as real numbers with the unit in the header, and subtotals as
-live `SUM` formulas. One schedule failing never stops the others.
-
-**Export Diagnostics.** Run this if the export fails. It tests each
-layer independently and writes `AVH_export_diagnostics.txt` beside the
-model. Its value is on a new machine, or after a Revit or pyRevit
-upgrade. Not needed day to day.
+live `SUM` formulas. One schedule failing never stops the others; its
+error is shown in the pyRevit output window.
 
 ### Worksets
 
@@ -88,9 +84,8 @@ without it, unloaded, nested and non workshared links are not offered,
 and the output window says which and why. After each reload the link's
 worksets are read back from Revit, so a reload that left the workset
 open is reported as exactly that. Reloading takes as long as Manage
-Links does, so large links take a while. If anything fails,
-`AVH_close_link_datums_trace.log` and `AVH_close_link_datums_crash.log`
-in Documents say which link, which step and why.
+Links does, so large links take a while. If anything fails, the output
+window says which link, which step and why.
 
 ### Tools
 
@@ -369,7 +364,8 @@ does not.
 | 2.34.0 | Stair Check becomes Gönguhlutfall stiga: rise and going only; To_Machinery checked against ÍST EN ISO 14122 | Not yet run in Revit |
 | 2.35.0 | Tools panel: Align Views, by the top left of the crop region | Worked |
 | 2.36.0 | Worksets panel: Close Link Datums | Not yet run in Revit |
-| 2.37.0 | Tools panel: Rename Views, a shared prefix and suffix and a field of each one's own | Current |
+| 2.37.0 | Tools panel: Rename Views, a shared prefix and suffix and a field of each one's own | Worked (one crash after committing, not reproduced) |
+| 2.38.0 | No files written on users' machines: Export Diagnostics removed, no trace or crash logs, temp files cleaned up | Current |
 
 ## Licence
 

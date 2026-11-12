@@ -29,23 +29,21 @@ import shutil    # noqa: E402
 import tempfile  # noqa: E402
 
 from avh_worksets import links      # noqa: E402
-from avh_schedules import crashlog  # noqa: E402
 
 results = []
 
-# The trace and crash log go to a throwaway folder, never to Documents.
-LOG_DIR = tempfile.mkdtemp(prefix="avh_cld_")
-crashlog.log_path = lambda extra=None, name=crashlog.LOG_NAME: \
-    os.path.join(LOG_DIR, name)
-TRACE = os.path.join(LOG_DIR, "AVH_close_link_datums_trace.log")
-CRASH = os.path.join(LOG_DIR, "AVH_close_link_datums_crash.log")
+# Since 2.38.0 the button writes no files on the user's machine. Every
+# run below points the home folder and TEMP at this empty folder, and the
+# end of the suite checks it is still empty.
+SANDBOX = tempfile.mkdtemp(prefix="avh_cld_")
+SANDBOX_VARS = ("USERPROFILE", "HOME", "TEMP", "TMP")
 
 
-def read_log(path):
-    if not os.path.exists(path):
-        return u""
-    with io.open(path, encoding="utf-8") as handle:
-        return handle.read()
+def files_in_sandbox():
+    found = []
+    for root, _dirs, files in os.walk(SANDBOX):
+        found.extend(os.path.join(root, name) for name in files)
+    return found
 
 
 def check(name, condition, detail=""):
@@ -302,9 +300,6 @@ class Recorder(object):
 
 def run_script(doc, picked=None, picker_raises=False, print_raises=False):
     FakeTransaction.started = 0
-    for path in (TRACE, CRASH):
-        if os.path.exists(path):
-            os.remove(path)
     recorder = Recorder()
 
     def show(items, **kwargs):
@@ -342,15 +337,26 @@ def run_script(doc, picked=None, picker_raises=False, print_raises=False):
         recorder.print_md(text)
 
     pyrevit.script = Namespace(
-        get_output=lambda: Namespace(print_md=print_md,
+        get_output=lambda: Namespace(print_md=print_md, print_code=print_md,
                                      update_progress=lambda *a: None),
         get_logger=lambda: Namespace(error=lambda *a: None,
                                      debug=lambda *a: None))
     sys.modules["pyrevit"] = pyrevit
+    saved_env = dict((k, os.environ.get(k)) for k in SANDBOX_VARS)
+    saved_tempdir = tempfile.tempdir
+    for key in SANDBOX_VARS:
+        os.environ[key] = SANDBOX
+    tempfile.tempdir = SANDBOX
     try:
         runpy.run_path(SCRIPT, run_name="__main__")
     finally:
         sys.modules.pop("pyrevit", None)
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        tempfile.tempdir = saved_tempdir
     return recorder
 
 
@@ -654,8 +660,8 @@ check("exception: the .NET type is in the report",
       recorder.text())
 check("exception: the full message, not just 'path'",
       u"not valid for this link" in recorder.text())
-check("exception: the crash log keeps the LoadFrom traceback",
-      u"FakeRevitError" in read_log(CRASH), read_log(CRASH)[-600:])
+check("exception: the output window keeps the LoadFrom traceback",
+      u"FakeRevitError" in recorder.text(), recorder.text()[-600:])
 
 # A plain Python exception still reads sensibly.
 plain_doc = acc_doc()
@@ -681,29 +687,20 @@ check("local: a failed reload that left it loaded does not say unloaded",
 # 4. Failures report themselves
 # --------------------------------------------------------------------------
 
-# An ordinary run leaves a trace that ends at done, and no crash log.
+# An ordinary run shows no error.
 ark = FakeLinkType(u"ARK.rvt", standard_doc())
 recorder = run_script(FakeDocument([ark]), picked=[u"ARK.rvt"])
-trace_text = read_log(TRACE)
-check("trace: written as the run goes",
-      u"reload ARK.rvt by file path" in trace_text, trace_text)
-check("trace: ends at done", trace_text.strip().endswith(u"done"),
-      trace_text)
-check("trace: no crash log when nothing failed", not read_log(CRASH))
+check("errors: none shown when nothing failed",
+      u"failed at" not in recorder.text(), recorder.text())
 
-# The trace starts fresh on each click rather than growing forever.
-recorder = run_script(FakeDocument([ark]), picked=None)
-check("trace: a new click starts a new trace",
-      u"reload ARK.rvt" not in read_log(TRACE), read_log(TRACE))
-
-# A refused cloud path leaves its traceback behind, naming the link.
+# A refused cloud path shows its traceback, naming the link and route.
 cloud = FakeLinkType(u"CLOUD.rvt", standard_doc(), path_raises=True)
 recorder = run_script(FakeDocument([cloud]), picked=[u"CLOUD.rvt"])
-crash_text = read_log(CRASH)
-check("crash log: LoadFrom failure recorded with the link and route",
-      u"LoadFrom on CLOUD.rvt by file path" in crash_text, crash_text[:400])
-check("crash log: with the traceback",
-      u"cloud path not accepted" in crash_text)
+check("errors: LoadFrom failure shown with the link and route",
+      u"LoadFrom on CLOUD.rvt by file path" in recorder.text(),
+      recorder.text()[:400])
+check("errors: with the traceback",
+      u"cloud path not accepted" in recorder.text())
 
 # Links that will not even list are not "no links".
 recorder = run_script(FakeDocument([], collector_raises=True), picked=None)
@@ -711,7 +708,8 @@ check("unreadable links: not reported as a model with no links",
       u"no Revit links" not in recorder.text(), recorder.text())
 check("unreadable links: said so",
       u"could not be read" in recorder.text(), recorder.text())
-check("unreadable links: crash log written", bool(read_log(CRASH)))
+check("unreadable links: the error is shown",
+      u"listing link types" in recorder.text(), recorder.text())
 
 # A picker that fails is not a cancel.
 ark = FakeLinkType(u"ARK.rvt", standard_doc())
@@ -721,7 +719,7 @@ check("picker failed: said so",
       u" | ".join(recorder.alerts))
 check("picker failed: nothing reloaded", not ark.loads)
 
-# Anything unforeseen ends in a dialog naming the stage and the log.
+# Anything unforeseen ends in a dialog naming the stage.
 ark_doc = standard_doc()
 ark = FakeLinkType(u"ARK.rvt", ark_doc)
 recorder = run_script(FakeDocument([ark]), picked=[u"ARK.rvt"],
@@ -729,60 +727,17 @@ recorder = run_script(FakeDocument([ark]), picked=[u"ARK.rvt"],
 check("unhandled: the user is told where it stopped",
       any(u"stopped at: report" in a for a in recorder.alerts),
       u" | ".join(recorder.alerts))
-check("unhandled: and the log exists", bool(read_log(CRASH)))
 check("unhandled: work already done is not undone",
       ark_doc.state()[2] is False)
 
 # --------------------------------------------------------------------------
-# 5. The crash logger itself
+# 5. Nothing written to disk
 # --------------------------------------------------------------------------
 
-# On Python 2 format_exc reports the most recently handled exception, so
-# anything write() catches before taking the traceback replaces the one
-# being logged. Python 3 restores the outer exception, so the bug cannot
-# be reproduced here; the order of the calls is checked instead.
-import traceback as _traceback  # noqa: E402
-
-calls = []
-real_format_exc = _traceback.format_exc
-real_log_path = crashlog.log_path
-
-
-def spy_format_exc(*args, **kwargs):
-    calls.append("format_exc")
-    return real_format_exc(*args, **kwargs)
-
-
-def spy_log_path(*args, **kwargs):
-    calls.append("log_path")
-    return real_log_path(*args, **kwargs)
-
-
-crashlog.traceback.format_exc = spy_format_exc
-crashlog.log_path = spy_log_path
-try:
-    try:
-        raise RuntimeError("the failure being logged")
-    except RuntimeError:
-        crashlog.write(u"stage", u"test", name="order_check.log")
-finally:
-    crashlog.traceback.format_exc = real_format_exc
-    crashlog.log_path = real_log_path
-check("crashlog: the traceback is taken before anything else runs",
-      calls[:1] == ["format_exc"], str(calls))
-
-with io.open(os.path.join(HERE, "lib", "avh_schedules", "crashlog.py"),
-             encoding="utf-8") as handle:
-    crashlog_source = handle.read()
-check("crashlog: no Python 3 only isoformat(timespec=)",
-      "timespec" not in crashlog_source)
-order_text = read_log(os.path.join(LOG_DIR, "order_check.log"))
-check("crashlog: the logged traceback is the real one",
-      u"the failure being logged" in order_text, order_text[-300:])
-check("crashlog: and it has a real timestamp",
-      u"(no timestamp)" not in order_text)
-
-shutil.rmtree(LOG_DIR, ignore_errors=True)
+written = files_in_sandbox()
+check("no files: every run above left the home folder and TEMP empty",
+      not written, written)
+shutil.rmtree(SANDBOX, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------
