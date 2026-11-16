@@ -1,0 +1,343 @@
+# -*- coding: utf-8 -*-
+"""
+The arithmetic behind Pipe Openings, outside Revit.
+
+The check that matters is that the pipe fits. A hole sized by a formula
+that is subtly wrong for a pipe at an angle looks right in plan and is
+found on site. So the sizes are not only compared with the formula that
+made them: points are sampled over the surface of the actual pipe,
+inside the actual slab, and every one must land inside the opening.
+
+Run outside Revit:
+
+    python test_openings_model.py
+"""
+
+import math
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "lib"))
+
+from avh_openings import model  # noqa: E402
+
+results = []
+
+
+def check(name, condition, detail=""):
+    results.append((name, bool(condition), detail))
+
+
+def close(a, b, tolerance=1e-6):
+    return abs(a - b) < tolerance
+
+
+MM = 1.0 / model.MM_PER_FOOT
+
+
+def settings(**kwargs):
+    values = dict(shape=model.RECTANGULAR, mode=model.GAP, amount=0.0,
+                  round_to=0.0, links=True)
+    values.update(kwargs)
+    return model.Settings(**values)
+
+
+# --------------------------------------------------------------------------
+# Rounding
+# --------------------------------------------------------------------------
+
+check("round up: 151 mm to 160", close(model.round_up(151 * MM, 10),
+                                      160 * MM))
+check("round up: 160 mm stays 160, not 170",
+      close(model.round_up(160 * MM, 10), 160 * MM))
+check("round up: 160 mm through feet and back stays 160",
+      close(model.round_up((160.0 / 304.8) * 1.0, 10), 160 * MM))
+check("round up: a step of 0 leaves it alone",
+      close(model.round_up(151.3 * MM, 0), 151.3 * MM))
+check("round up: never down", model.round_up(150.001 * MM, 10) > 150 * MM)
+
+# --------------------------------------------------------------------------
+# Settings
+# --------------------------------------------------------------------------
+
+parsed = model.parse_settings(model.CIRCULAR, model.GAP, u"25", u"10", True)
+check("settings: plain", parsed.shape == model.CIRCULAR and
+      parsed.amount == 25.0 and parsed.round_to == 10.0)
+parsed = model.parse_settings(model.RECTANGULAR, model.GAP, u"12,5", u"5",
+                              False)
+check("settings: decimal comma", parsed.amount == 12.5 and not parsed.links)
+parsed = model.parse_settings(model.RECTANGULAR, model.PERCENT, u"20 %",
+                              u"", True)
+check("settings: percent sign and blank rounding",
+      parsed.amount == 20.0 and parsed.round_to == 0.0)
+parsed = model.parse_settings(model.RECTANGULAR, model.GAP, u"30mm", u"10",
+                              True)
+check("settings: a trailing mm", parsed.amount == 30.0)
+
+
+def refuses(*args):
+    try:
+        model.parse_settings(*args)
+    except model.SettingsError as exc:
+        return u"{0}".format(exc)
+    return None
+
+
+check("settings: empty refused",
+      refuses(model.RECTANGULAR, model.GAP, u"", u"10", True))
+check("settings: text refused",
+      refuses(model.RECTANGULAR, model.GAP, u"abc", u"10", True))
+check("settings: negative refused",
+      refuses(model.RECTANGULAR, model.GAP, u"-5", u"10", True))
+check("settings: a metre of clearance refused",
+      refuses(model.RECTANGULAR, model.GAP, u"1000", u"10", True))
+check("settings: 500% refused",
+      refuses(model.RECTANGULAR, model.PERCENT, u"500", u"10", True))
+check("settings: unknown shape refused",
+      refuses(u"oval", model.GAP, u"25", u"10", True))
+check("settings: nan refused",
+      refuses(model.RECTANGULAR, model.GAP, u"nan", u"10", True))
+message = refuses(model.RECTANGULAR, model.PERCENT, u"x", u"10", True)
+check("settings: the message names the field",
+      message and u"percentage" in message, message)
+
+restored = model.settings_from_dict({"shape": model.CIRCULAR,
+                                     "amount": u"40", "links": False})
+check("remembered: kept what was there", restored.shape == model.CIRCULAR
+      and restored.amount == 40.0 and not restored.links)
+restored = model.settings_from_dict({"amount": u"garbage"})
+check("remembered: a broken value falls back to the defaults",
+      restored.amount == model.DEFAULTS["amount"])
+restored = model.settings_from_dict(None)
+check("remembered: nothing stored gives the defaults",
+      restored.shape == model.DEFAULTS["shape"])
+
+check("describe: gap", u"25 mm clear" in settings(amount=25).describe())
+check("describe: percent",
+      u"20% larger" in settings(mode=model.PERCENT, amount=20).describe())
+
+# --------------------------------------------------------------------------
+# Gap
+# --------------------------------------------------------------------------
+
+check("gap: millimetres", close(model.gap_feet(settings(amount=25),
+                                               110 * MM), 25 * MM))
+check("gap: 20% of a 100 mm pipe is 10 mm a side",
+      close(model.gap_feet(settings(mode=model.PERCENT, amount=20),
+                           100 * MM), 10 * MM))
+
+# --------------------------------------------------------------------------
+# Square crossings, the everyday case
+# --------------------------------------------------------------------------
+
+floor = model.slab_frame()
+entry = (10.0, 5.0, 0.0)
+exit = (10.0, 5.0, 250 * MM)
+opening, reason = model.size_opening(entry, exit, 110 * MM, floor,
+                                     settings(amount=25, round_to=10))
+check("floor, square: 110 mm pipe, 25 mm gap -> 160 x 160",
+      opening and close(opening.width, 160 * MM) and
+      close(opening.height, 160 * MM),
+      opening and opening.size_text())
+check("floor, square: centred on the pipe",
+      opening and close(opening.center[0], 10.0) and
+      close(opening.center[1], 5.0))
+check("floor, square: centre on the slab's middle plane",
+      opening and close(opening.center[2], 125 * MM))
+check("floor, square: no skew", opening and close(opening.skew, 0.0))
+
+opening, reason = model.size_opening(entry, exit, 110 * MM, floor,
+                                     settings(shape=model.CIRCULAR,
+                                              amount=25, round_to=10))
+check("floor, circular: 160", opening and
+      close(opening.diameter, 160 * MM), opening and opening.size_text())
+
+opening, reason = model.size_opening(
+    entry, exit, 100 * MM, floor,
+    settings(mode=model.PERCENT, amount=20, round_to=0))
+check("floor, percent: 100 mm pipe 20% larger -> 120",
+      opening and close(opening.width, 120 * MM))
+
+# A wall running along X, the pipe through it along Y.
+wall = model.wall_frame((1.0, 0.0, 0.0))
+check("wall frame: orthonormal",
+      close(model.dot(wall.u, wall.v), 0) and
+      close(model.dot(wall.u, wall.n), 0) and
+      close(model.dot(wall.v, wall.n), 0) and
+      close(model.length(wall.n), 1))
+check("wall frame: n is through the wall", close(abs(wall.n[1]), 1.0))
+opening, reason = model.size_opening((3.0, 0.0, 4.0), (3.0, 1.0, 4.0),
+                                     110 * MM, wall,
+                                     settings(amount=25, round_to=10))
+check("wall, square: 160 x 160", opening and
+      close(opening.width, 160 * MM) and close(opening.height, 160 * MM))
+corners = opening.corners()
+check("wall, square: corners lie in the wall's middle plane",
+      all(close(c[1], 0.5) for c in corners), corners)
+check("wall, square: corners span the width along the wall",
+      close(max(c[0] for c in corners) - min(c[0] for c in corners),
+            160 * MM))
+check("wall, square: corners span the height upward",
+      close(max(c[2] for c in corners) - min(c[2] for c in corners),
+            160 * MM))
+check("wall frame: a vertical direction has no frame",
+      model.wall_frame((0.0, 0.0, 1.0)) is None)
+
+# --------------------------------------------------------------------------
+# The pipe must fit: sample it
+# --------------------------------------------------------------------------
+
+
+def perpendiculars(direction):
+    helper = (0.0, 0.0, 1.0) if abs(direction[2]) < 0.9 else (1.0, 0.0, 0.0)
+    first = model.unit(model.cross(direction, helper))
+    second = model.cross(direction, first)
+    return first, second
+
+
+def pipe_points_in_slab(entry, exit, radius, frame):
+    """Points on the pipe's surface lying inside the slab, which is the
+    region between the planes through entry and exit square to n."""
+    direction = model.unit(model.sub(exit, entry))
+    first, second = perpendiculars(direction)
+    low = model.dot(entry, frame.n)
+    high = model.dot(exit, frame.n)
+    low, high = min(low, high), max(low, high)
+    axis_length = model.length(model.sub(exit, entry))
+    found = []
+    for i in range(-60, 161):
+        t = axis_length * i / 100.0
+        base = model.add(entry, model.scale(direction, t))
+        for k in range(72):
+            angle = 2.0 * math.pi * k / 72.0
+            offset = model.add(model.scale(first, radius * math.cos(angle)),
+                               model.scale(second, radius * math.sin(angle)))
+            p = model.add(base, offset)
+            depth = model.dot(p, frame.n)
+            if low - 1e-9 <= depth <= high + 1e-9:
+                found.append(p)
+    return found
+
+
+def fits(opening, points, frame):
+    cu, cv, _ = frame.local(opening.center)
+    worst = 0.0
+    for p in points:
+        u, v, _ = frame.local(p)
+        if opening.shape == model.CIRCULAR:
+            over = math.hypot(u - cu, v - cv) - opening.diameter / 2.0
+        else:
+            over = max(abs(u - cu) - opening.width / 2.0,
+                       abs(v - cv) - opening.height / 2.0)
+        worst = max(worst, over)
+    return worst <= 1e-6, worst
+
+
+def tight(opening, points, frame):
+    """The opening is no more than 2 mm larger than the pipe needs, so a
+    formula that is safe only because it is huge is caught too."""
+    cu, cv, _ = frame.local(opening.center)
+    if opening.shape == model.CIRCULAR:
+        need = max(math.hypot(frame.local(p)[0] - cu,
+                              frame.local(p)[1] - cv) for p in points)
+        return opening.diameter / 2.0 - need < 2 * MM
+    need_u = max(abs(frame.local(p)[0] - cu) for p in points)
+    need_v = max(abs(frame.local(p)[1] - cv) for p in points)
+    return (opening.width / 2.0 - need_u < 2 * MM and
+            opening.height / 2.0 - need_v < 2 * MM)
+
+
+cases = [
+    (u"wall, 30 degrees in plan", wall, (3.0, 0.0, 4.0),
+     (3.0 + math.tan(math.radians(30)) * 1.0, 1.0, 4.0)),
+    (u"wall, 45 degrees falling", wall, (3.0, 0.0, 4.0),
+     (3.0, 1.0, 3.0)),
+    (u"wall, compound 20 and 35", wall, (3.0, 0.0, 4.0),
+     (3.0 + math.tan(math.radians(20)), 1.0,
+      4.0 - math.tan(math.radians(35)))),
+    (u"floor, 40 degrees off vertical", floor, (0.0, 0.0, 0.0),
+     (math.tan(math.radians(40)) * 0.8, 0.0, 0.8)),
+    (u"floor, 60 degrees diagonal", floor, (0.0, 0.0, 0.0),
+     (math.tan(math.radians(60)) * 0.5 / math.sqrt(2),
+      math.tan(math.radians(60)) * 0.5 / math.sqrt(2), 0.5)),
+]
+for label, frame, entry, exit in cases:
+    for shape in model.SHAPES:
+        opening, reason = model.size_opening(
+            entry, exit, 160 * MM, frame,
+            settings(shape=shape, amount=0, round_to=0))
+        points = pipe_points_in_slab(entry, exit, 80 * MM, frame)
+        ok, worst = fits(opening, points, frame) if opening else (False, 0)
+        check(u"fits: {0}, {1}".format(label, shape), ok,
+              u"{0:.3f} mm outside".format(worst * model.MM_PER_FOOT))
+        if shape == model.RECTANGULAR and opening:
+            check(u"tight: {0}, rectangle".format(label),
+                  tight(opening, points, frame), opening.size_text())
+
+# The skew a 30 degree pipe reports
+opening, _ = model.size_opening(cases[0][2], cases[0][3], 160 * MM, wall,
+                                settings())
+check("skew: 30 degrees reported", opening and
+      abs(opening.skew - 30.0) < 1e-6, opening and opening.skew)
+
+# --------------------------------------------------------------------------
+# Refused
+# --------------------------------------------------------------------------
+
+opening, reason = model.size_opening(
+    (0.0, 0.0, 4.0), (math.tan(math.radians(80)), 1.0, 4.0), 110 * MM, wall,
+    settings())
+check("refused: 80 degrees off square", opening is None and
+      u"80 degrees" in reason, reason)
+opening, reason = model.size_opening((0.0, 0.0, 0.0), (0.0, 0.0, 0.0),
+                                     110 * MM, wall, settings())
+check("refused: no length", opening is None and reason)
+opening, reason = model.size_opening((0.0, 0.0, 0.0), (0.0, 1.0, 0.0),
+                                     0.0, wall, settings())
+check("refused: no diameter", opening is None and reason)
+
+# --------------------------------------------------------------------------
+# Joining segments
+# --------------------------------------------------------------------------
+
+layers = [((0.0, 0.3, 0.0), (0.0, 0.6, 0.0)),
+          ((0.0, 0.0, 0.0), (0.0, 0.3, 0.0)),
+          ((0.0, 0.9, 0.0), (0.0, 0.6, 0.0))]
+joined = model.join_segments(layers)
+check("join: three touching layers in any order are one crossing",
+      len(joined) == 1 and close(joined[0][0][1], 0.0) and
+      close(joined[0][1][1], 0.9), joined)
+joined = model.join_segments([((0.0, 0.0, 0.0), (0.0, 0.3, 0.0)),
+                              ((0.0, 5.0, 0.0), (0.0, 5.3, 0.0))])
+check("join: two separate crossings stay two", len(joined) == 2)
+check("join: nothing in, nothing out", model.join_segments([]) == [])
+check("boxes: touching", model.boxes_touch(((0, 0, 0), (1, 1, 1)),
+                                           ((1, 1, 1), (2, 2, 2))))
+check("boxes: apart", not model.boxes_touch(((0, 0, 0), (1, 1, 1)),
+                                            ((1.1, 0, 0), (2, 1, 1))))
+
+# --------------------------------------------------------------------------
+# The checks can fail
+# --------------------------------------------------------------------------
+
+bad = model.Opening(model.RECTANGULAR, floor, (0.0, 0.0, 0.0),
+                    width=100 * MM, height=100 * MM)
+points = pipe_points_in_slab((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 80 * MM,
+                             floor)
+check("self-check: a too small opening does not fit",
+      not fits(bad, points, floor)[0])
+big = model.Opening(model.RECTANGULAR, floor, (0.0, 0.0, 0.0),
+                    width=300 * MM, height=300 * MM)
+check("self-check: an oversized opening is not tight",
+      not tight(big, points, floor))
+check("self-check: check stores a real boolean",
+      all(isinstance(passed, bool) for _, passed, _ in results))
+
+failed = [r for r in results if not r[1]]
+for name, passed, detail in results:
+    print(u"{0}  {1}{2}".format("PASS" if passed else "FAIL", name,
+                                u"  ({0})".format(detail)
+                                if not passed and detail != "" else u""))
+print(u"\n{0} checks, {1} failed".format(len(results), len(failed)))
+sys.exit(1 if failed else 0)

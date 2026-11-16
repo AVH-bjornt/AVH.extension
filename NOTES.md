@@ -1178,6 +1178,8 @@ python test_hide_in_template_harness.py
 python test_hide_across_views_harness.py
 python test_clash_model.py
 python test_clash_detector_harness.py
+python test_openings_model.py
+python test_pipe_openings_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -2109,6 +2111,71 @@ WebView2 problem from an ExternalEvent one.
 Not done: clearance (near miss) tests, clash status that survives
 closing the window, a report to Excel, and view visibility for linked
 elements (a link is tested whole unless the view has a section box).
+
+## Pipe Openings (2.47.0)
+
+Select walls, floors or roofs; a window asks for the shape and the
+clearance; every pipe and conduit through them gets an opening.
+
+### Found through the solid, not the box
+
+A crossing is found by putting the pipe's centre line through the
+host's actual solid (`Solid.IntersectWithCurve`), not with bounding
+boxes or `ElementIntersectsElementFilter`. The filter only works inside
+one document and the pipes are usually in a link; boxes find a pipe
+that passes beside a wall. The solid gives the two points where the
+axis meets the faces, which is exactly what the sizing needs.
+
+Two things fall out of that for free. A pipe that already has an
+opening runs through the hole and no longer meets the solid, so a
+second run cuts nothing. And after the run the same test is the
+independent check: each pipe is put through its host again and one
+that still meets it where the opening should be is flagged, whatever
+Revit reported.
+
+A compound wall can come back as one solid per layer. The segments are
+joined where they touch (`model.join_segments`), or the wall would get
+one half size opening per layer. A mutation that removes the join is
+caught by the layered wall scenario in the harness.
+
+### The size of a hole for a pipe at an angle
+
+The opening is the face ellipse swept along the axis through the slab.
+In a direction w in the face it reaches r * sqrt(1 + ((d.w)/(d.n))^2)
+past the projected axis end points; a circle needs half the projected
+axis plus r / |d.n|. `test_openings_model.py` does not trust that
+formula: it samples points over the real pipe surface inside the real
+slab at five angles and checks every one lands inside, and that the
+rectangle is within 2 mm of the tightest that fits. Past 75 degrees off
+square the crossing is skipped.
+
+### Circular wall openings need a family
+
+`Document.Create.NewOpening` makes rectangles in walls and any profile
+in floors and roofs, so a round wall opening has to be a family:
+wall hosted Generic Model `AVH_Round_Opening`, a void cylinder through
+the wall, a length instance parameter `AVH_Diameter`. Building one at
+run time from Revit's template was considered and rejected: a family
+document, a void extrusion and a load, all unverified, to save making
+one file once by hand. Until the file exists the wall rows are skipped
+with that reason and the rest of the run goes ahead.
+
+### What the mutations proved
+
+Twelve mutations, each caught: the angle ignored in the rectangle (7
+checks fail) or the circle (5), rounding down (2), no skew limit (4),
+insulation ignored (1), link transform ignored (1), commit status
+ignored (1), no check after (2), no move back for a misplaced family
+(4), group assimilate status ignored (1), no regenerate before reading
+a new instance's position (5), segments not joined (2, after adding the
+layered wall; it survived until then).
+
+### Unverified
+
+Everything crossing into Revit, read from the API documentation only:
+`Solid.IntersectWithCurve`, `NewOpening` in both forms, `Arc.Create`,
+`NewFamilyInstance` on a wall host, `TransactionGroup.Assimilate`, the
+MEP diameter and insulation parameters, and the WPF settings window.
 
 ## Update AVH: measured, not trusted
 

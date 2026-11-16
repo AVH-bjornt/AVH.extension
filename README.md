@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.46.0.** The authoritative number is `__version__` in
+**Version 2.47.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -190,6 +190,34 @@ reference planes, with text parameters `AVH_Easting`, `AVH_Northing`,
 `AVH_Elevation` and `AVH_Point_Name`. A parameter the family does not
 have is reported rather than fatal, so a renamed one shows up in the
 output instead of stopping the run.
+
+**Pipe Openings.** Select walls, floors or roofs and click. A window
+asks for the shape, rectangular or circular, and how much larger than
+the pipe the hole should be: millimetres clear on every side, or a
+percentage of the pipe. The size is rounded up to a step you choose
+(10 mm by default), and pipes and conduits in linked models can be
+included. The last settings are remembered.
+
+Every pipe and conduit whose centre line passes through a selected
+element is found, sized from its outer diameter with insulation, and
+listed in the output window before anything is cut. A pipe crossing at
+an angle gets a larger hole, worked out so it still fits. One more than
+75 degrees off square is listed and skipped. A pipe that already has an
+opening runs through the hole and is not counted again, so running it
+twice does not cut twice.
+
+Each opening is its own step, so one Revit refuses is reported and the
+rest still go in, and the whole run is one undo. Afterwards every pipe
+is put through its host again, and an opening that does not clear its
+pipe is flagged rather than reported as made.
+
+Walls and slabs use Revit's own openings. **Round wall openings need a
+family**, because Revit has none: a wall hosted Generic Model named
+`AVH_Round_Opening` with a void cylinder through the wall and a length
+instance parameter `AVH_Diameter`, loaded in the model or saved as
+`assets/AVH_Round_Opening.rfa`. It is not in the repository yet; until
+it is, round openings in walls are listed as skipped and floors and
+roofs are still cut. Curved walls and curtain walls are refused.
 
 **Point Cloud to Toposolid.** Pick a linked point cloud, a point
 spacing in metres, a toposolid type and a level. The cloud is read in
@@ -520,7 +548,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.44.2 | Clash Detector: messages to the viewer written by AVH's own JSON encoder, plain ASCII whatever the names hold | Never reached Revit: the persistent engine kept running the 2.44.0 window module |
 | 2.44.3 | Clash Detector: each new window reloads its modules from disk | Not yet run in Revit |
 | 2.45.0 | Clash Detector setup: model A and model B, one category list with A and B buttons under discipline headings, presets, tolerance beside Run | Not yet run in Revit |
-| 2.46.0 | Clash Detector: clearance zones round pipes, soft clashes in violet; a pipe never clashes with its own fittings or insulation | Not yet run in Revit, current |
+| 2.46.0 | Clash Detector: clearance zones round pipes, soft clashes in violet; a pipe never clashes with its own fittings or insulation | Not yet run in Revit |
+| 2.47.0 | Model panel: Pipe Openings, rectangular or circular openings round pipes and conduits through selected walls, floors and roofs | Not yet run in Revit, current |
 
 ## Licence
 
