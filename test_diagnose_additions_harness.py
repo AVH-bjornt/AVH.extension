@@ -34,7 +34,7 @@ import sys
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BUNDLE = os.path.join(HERE, "AVH.tab", "Tools.panel",
+BUNDLE = os.path.join(HERE, "AVH.tab", "Check.panel",
                       "Diagnose Invisibility.pushbutton")
 SCRIPT = os.path.join(BUNDLE, "script.py")
 

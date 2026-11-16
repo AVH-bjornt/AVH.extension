@@ -24,7 +24,8 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Tools.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Views.panel",
+                      "Visibility.stack", "Hide.pulldown",
                       "Hide in Template.pushbutton", "script.py")
 
 from avh_visibility import model  # noqa: E402

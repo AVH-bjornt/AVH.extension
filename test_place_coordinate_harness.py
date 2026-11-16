@@ -25,7 +25,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Tools.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Model.panel",
                       "Place at Coordinate.pushbutton", "script.py")
 
 from avh_coords import model  # noqa: E402

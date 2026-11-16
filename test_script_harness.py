@@ -25,7 +25,7 @@ import tempfile
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "AVH.tab", "Schedules.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Data.panel",
                       "ExportSchedule.pushbutton", "script.py")
 SOURCE_CSV = ("/root/.claude/uploads/0229f214-6cab-5076-81c9-61ec6de77d0f/"
               "141c00f4-ELG_CC01_K.K01_C08.csv")

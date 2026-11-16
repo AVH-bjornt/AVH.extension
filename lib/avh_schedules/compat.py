@@ -79,6 +79,27 @@ def write_text(path, text, mode="w", encoding="utf-8"):
     return path
 
 
+def element_id_int(element_id):
+    """An ElementId as a plain int, on any Revit version.
+
+    Revit 2024 replaced ElementId.IntegerValue with ElementId.Value, and
+    the old property is obsolete there and gone in later releases, so the
+    new one is tried first. None for something that is not an id.
+    """
+    if element_id is None:
+        return None
+    for attribute in ("Value", "IntegerValue"):
+        try:
+            value = getattr(element_id, attribute)
+        except Exception:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def is_number_text(value):
     """True if the text is a plain integer, without Python 2 unicode traps.
 

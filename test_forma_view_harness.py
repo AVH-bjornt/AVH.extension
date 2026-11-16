@@ -30,7 +30,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Forma.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Coordination.panel",
                       "Make Forma View.pushbutton", "script.py")
 
 from avh_forma import model  # noqa: E402

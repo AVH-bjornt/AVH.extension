@@ -1,0 +1,4 @@
+tooltip: Hide or unhide elements or categories, in chosen views or in view templates.
+layout:
+  - Hide Across Views
+  - Hide in Template

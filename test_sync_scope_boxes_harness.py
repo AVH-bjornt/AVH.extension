@@ -29,7 +29,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Tools.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Coordination.panel",
                       "Sync Scope Boxes.pushbutton", "script.py")
 
 from avh_scopebox import model  # noqa: E402

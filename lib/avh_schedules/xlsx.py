@@ -216,6 +216,8 @@ class Worksheet(object):
         self._cells = {}          # (row, col) -> (value, style_id, is_formula)
         self._merges = []
         self._col_widths = {}
+        self._hidden_cols = set()
+        self.hidden = False       # a hidden sheet, listed under Unhide
         self._row_heights = {}
         self._freeze = None
         self._image = None
@@ -243,6 +245,10 @@ class Worksheet(object):
 
     def column_width(self, col, width):
         self._col_widths[col] = width
+
+    def hide_column(self, col):
+        """Hide a column. Its cells stay in the file and keep their data."""
+        self._hidden_cols.add(col)
 
     def row_height(self, row, height):
         self._row_heights[row] = height
@@ -300,12 +306,13 @@ class Worksheet(object):
 
         parts.append('<sheetFormatPr defaultRowHeight="15"/>')
 
-        if self._col_widths:
+        if self._col_widths or self._hidden_cols:
             parts.append("<cols>")
-            for col in sorted(self._col_widths):
+            for col in sorted(set(self._col_widths) | self._hidden_cols):
+                hidden = ' hidden="1"' if col in self._hidden_cols else ""
                 parts.append('<col min="{0}" max="{0}" width="{1}" '
-                             'customWidth="1"/>'.format(
-                                 col, self._col_widths[col]))
+                             'customWidth="1"{2}/>'.format(
+                                 col, self._col_widths.get(col, 9), hidden))
             parts.append("</cols>")
 
         parts.append("<sheetData>")
@@ -524,8 +531,10 @@ class Workbook(object):
                  'openxmlformats.org/officeDocument/2006/relationships">'
                  "<sheets>"]
         for i, sheet in enumerate(self.sheets, start=1):
-            parts.append('<sheet name="{0}" sheetId="{1}" r:id="rId{1}"/>'
-                         .format(escape(sheet.name[:31]), i))
+            state = ' state="hidden"' if sheet.hidden else ""
+            parts.append('<sheet name="{0}" sheetId="{1}"{2} '
+                         'r:id="rId{1}"/>'.format(
+                             escape(sheet.name[:31]), i, state))
         parts.append("</sheets>")
 
         areas = [(i, s) for i, s in enumerate(self.sheets, start=1)

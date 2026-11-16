@@ -21,7 +21,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Worksets.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Coordination.panel", "Links.stack",
                       "Datums to Workset.pushbutton", "script.py")
 
 from avh_worksets import model  # noqa: E402

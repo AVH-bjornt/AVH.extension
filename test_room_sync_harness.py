@@ -25,7 +25,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Data.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Data.panel", "Parameters.stack",
                       "Room Data Sync.pushbutton", "script.py")
 
 from avh_rooms import model  # noqa: E402

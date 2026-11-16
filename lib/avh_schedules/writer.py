@@ -14,7 +14,7 @@ into the column header.
 
 import os
 
-from . import style, xlsx
+from . import roundtrip, style, xlsx
 from .compat import to_text
 from .model import find_column
 
@@ -120,6 +120,8 @@ def write_workbook(table, output_path, logo_path=None, sheet_name=None):
     quantity_cols = set(c.index for c in table.columns if _is_quantity(c))
     group_ranges = []
     has_sections = table.group_column is not None
+    can_roundtrip = table.can_roundtrip
+    id_cells = []             # (excel row, element id) for the hidden column
 
     for label, group_rows in table.groups():
         if has_sections:
@@ -143,6 +145,10 @@ def write_workbook(table, output_path, logo_path=None, sheet_name=None):
                     kind = "text"
                 sheet.cell(row, col.index + 1, value,
                            style.body_style(kind, striped))
+            if can_roundtrip:
+                ident = roundtrip.row_id(table, data_row)
+                if ident is not None:
+                    id_cells.append((row, ident))
             row += 1
 
         end = row - 1
@@ -179,6 +185,13 @@ def write_workbook(table, output_path, logo_path=None, sheet_name=None):
     sheet.landscape = True
     sheet.fit_to_width = 1
     sheet.print_area("A1:{0}{1}".format(xlsx.column_letter(n_cols), row - 1))
+
+    # What lets the workbook be imported again: the element id of every
+    # row in a hidden column, and a hidden snapshot sheet. The print area
+    # above stops short of the hidden column.
+    if can_roundtrip:
+        roundtrip.add_id_column(sheet, table, id_cells, header_last)
+        roundtrip.add_snapshot_sheet(book, table)
 
     book.save(output_path)
     return output_path

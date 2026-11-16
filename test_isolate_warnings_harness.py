@@ -20,7 +20,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Tools.panel",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Check.panel", "Checks.stack",
                       "Isolate Warnings.pushbutton", "script.py")
 
 from avh_warnings import model  # noqa: E402

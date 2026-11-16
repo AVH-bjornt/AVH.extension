@@ -142,6 +142,21 @@ class ScheduleTable(object):
         self.count_column = count_column
         self.grand_total_label = grand_total_label
 
+        # Round trip data, all absent for a plain export. When id_index is
+        # set, every row carries one extra trailing value past the visible
+        # columns: the id of the Revit element it came from, or None. The
+        # column objects do not include it, so nothing that walks
+        # `columns` ever sees it.
+        self.id_index = None
+        self.fields = None        # one roundtrip.FieldSpec per column
+        self.meta = {}            # schedule id, model, export time
+        self.roundtrip_note = u""  # why a workbook is NOT round trippable
+
+    @property
+    def can_roundtrip(self):
+        return (self.id_index is not None and self.fields is not None
+                and len(self.fields) == len(self.columns))
+
     @property
     def n_cols(self):
         return len(self.columns)

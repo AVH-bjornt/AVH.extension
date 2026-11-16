@@ -58,7 +58,7 @@ for root, dirs, files in os.walk(HERE):
 # somebody else's file to satisfy a rule it does not break would only be
 # churn in a file nobody here wrote.
 THIRD_PARTY = set([
-    os.path.join("AVH.tab", "Tools.panel",
+    os.path.join("AVH.tab", "Check.panel",
                  "Diagnose Invisibility.pushbutton", "script.py"),
 ])
 

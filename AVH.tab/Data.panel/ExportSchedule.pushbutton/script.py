@@ -238,8 +238,14 @@ def choose_schedules(doc, uidoc):
 
 def run():
     trace("resolve extension paths")
-    ext_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))))
+    # Search upward for the folder holding lib rather than counting
+    # levels, so the button survives being moved into a stack or pulldown.
+    ext_dir = os.path.dirname(os.path.abspath(__file__))
+    while not os.path.isdir(os.path.join(ext_dir, "lib")):
+        parent = os.path.dirname(ext_dir)
+        if parent == ext_dir:
+            break
+        ext_dir = parent
     lib_dir = os.path.join(ext_dir, "lib")
     logo_path = os.path.join(ext_dir, "assets", "avh_logo.png")
     if lib_dir not in sys.path:
@@ -350,6 +356,14 @@ def report(written, failed, target_dir):
                     group = u"by " + column.name
             lines.append(u"  {0}  ({1} rows, {2}, {3} groups)".format(
                 name, len(table.rows), group, len(table.groups())))
+            # Say so when a workbook cannot be imported again, instead of
+            # leaving that to be found out after it has been edited.
+            if not getattr(table, "can_roundtrip", False):
+                reason = getattr(table, "roundtrip_note", u"") or u"unknown"
+                lines.append(u"    cannot be imported again: {0}".format(
+                    reason))
+            elif getattr(table, "roundtrip_note", u""):
+                lines.append(u"    {0}".format(table.roundtrip_note))
     if failed:
         if lines:
             lines.append(u"")

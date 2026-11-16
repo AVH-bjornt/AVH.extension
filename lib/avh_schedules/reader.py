@@ -25,14 +25,22 @@ from the blank cell pattern Revit writes for grouped headers. That
 reconstruction is verified against the real door schedules in tests.
 """
 
+import datetime
 import os
 import shutil
 import tempfile
 
-from .compat import is_number_text, read_text, to_text
+from .compat import element_id_int, is_number_text, read_text, to_text
 from .model import (
     Column, ScheduleTable, apply_parsing, confirm_render_row,
     detect_column_types, find_level_column, is_render_candidate,
+)
+from .applier import find_parameter
+from .matching import UNKNOWN, match_rows
+from .stamp import is_stamp_name
+from .roundtrip import (
+    KIND_INSTANCE, KIND_OTHER, KIND_TYPE, TEMP_HEADING, FieldSpec,
+    extract_id_column, row_id,
 )
 
 TAB = "\t"
@@ -294,11 +302,413 @@ def _no_text_qualifier():
 
 
 def read_schedule(view_schedule):
-    """Read one Revit ViewSchedule into a ScheduleTable."""
+    """Read one Revit ViewSchedule into a ScheduleTable.
+
+    Tries to read it so the workbook can be imported again, which means
+    knowing the element behind every row. If that is not possible for any
+    reason, the plain export is read instead and the table says why in
+    roundtrip_note: a failure to add the ids must never cost the export.
+    """
+    note = u""
+    try:
+        return read_schedule_with_ids(view_schedule)
+    except NoIdField as exc:
+        # Revit 2025 offers no Element Id schedule field, so the ids are
+        # recovered by matching each row to an element instead.
+        note = to_text(exc)
+        try:
+            return read_schedule_by_matching(view_schedule)
+        except NotRoundTrippable as inner:
+            note = to_text(inner)
+        except Exception as inner:
+            note = u"{0}: {1}".format(type(inner).__name__, to_text(inner))
+    except NotRoundTrippable as exc:
+        note = to_text(exc)
+    except Exception as exc:
+        # Anything else, including a Revit that lacks an API used below.
+        note = u"{0}: {1}".format(type(exc).__name__, to_text(exc))
+
     text = export_schedule_text(view_schedule, TAB)
-    return parse_delimited(
+    table = parse_delimited(
         text,
         delimiter=TAB,
         title=view_schedule.Name,
         group_field_name=get_group_field_name(view_schedule),
     )
+    table.roundtrip_note = note or u"not available for this schedule"
+    return table
+
+
+# --- reading with element ids -----------------------------------------
+#
+# UNVERIFIED IN REVIT as of 2.40.0. Everything below touches the Revit API
+# and has been exercised only against a mock. The calls that carry the
+# risk are named where they are made.
+
+class NotRoundTrippable(Exception):
+    """This schedule cannot be exported in a form that imports again."""
+
+
+class NoIdField(NotRoundTrippable):
+    """Revit offers no Element Id field for this schedule."""
+
+
+def field_specs(view_schedule):
+    """One FieldSpec per exported column, from the schedule's own fields.
+
+    The exported columns are the schedule's visible fields, in field
+    order, so the two line up one to one. The caller checks the counts
+    match rather than trusting that.
+    """
+    definition = view_schedule.Definition
+    doc = view_schedule.Document
+    specs = []
+    for field_id in definition.GetFieldOrder():
+        field = definition.GetField(field_id)
+        if field.IsHidden:
+            continue
+        specs.append(_spec_for_field(len(specs), field, doc))
+    return specs
+
+
+def _field_type_name(field):
+    try:
+        return to_text(field.FieldType)
+    except Exception:
+        return u""
+
+
+def _spec_for_field(index, field, doc):
+    type_name = _field_type_name(field)
+    if type_name == u"Instance":
+        kind = KIND_INSTANCE
+    elif type_name == u"ElementType":
+        kind = KIND_TYPE
+    else:
+        kind = KIND_OTHER
+
+    try:
+        name = to_text(field.ColumnHeading)
+    except Exception:
+        name = u""
+    try:
+        param_name = to_text(field.GetName())
+    except Exception:
+        param_name = u""
+    return FieldSpec(
+        index=index,
+        name=name or param_name,
+        kind=kind,
+        param_id=element_id_int(getattr(field, "ParameterId", None)),
+        param_name=param_name,
+        unit_id=_unit_id(field, doc))
+
+
+def _unit_id(field, doc):
+    """The unit the column is displayed in, as a ForgeTypeId string.
+
+    What a person types into a numeric cell is in this unit, so it is what
+    the value has to be converted from on import. Empty when it cannot be
+    worked out, which makes a numeric edit to that column refused rather
+    than guessed.
+
+    UNVERIFIED: GetFormatOptions, UseDefault, GetSpecTypeId and
+    GetUnitTypeId are the Revit 2021+ API.
+    """
+    try:
+        options = field.GetFormatOptions()
+        if options.UseDefault:
+            options = doc.GetUnits().GetFormatOptions(field.GetSpecTypeId())
+        return to_text(options.GetUnitTypeId().TypeId)
+    except Exception:
+        return u""
+
+
+def _find_id_field(definition, doc):
+    """(schedulable field, trusted), or (None, False).
+
+    trusted is True for Revit's own Element Id field, whose values cannot
+    be wrong. False for the Element ID PARAMETER that AVH's Stamp Element
+    IDs button (or a Dynamo script) writes: it is only a number somebody
+    pasted into a text field, and a copied element keeps the number it was
+    copied from, so every id read from it is verified before it is used.
+
+    UNVERIFIED: that Revit offers its own Element Id field. Revit 2025 does
+    not: ID_PARAM was -1002100 and nothing carried that id.
+    """
+    from Autodesk.Revit.DB import BuiltInParameter, ElementId
+
+    wanted = element_id_int(ElementId(BuiltInParameter.ID_PARAM))
+    offered = list(definition.GetSchedulableFields())
+    for schedulable in offered:
+        if element_id_int(schedulable.ParameterId) == wanted:
+            return schedulable, True
+    for schedulable in offered:
+        try:
+            name = to_text(schedulable.GetName(doc))
+        except Exception:
+            continue
+        if is_stamp_name(name):
+            return schedulable, False
+    return None, False
+
+
+def read_schedule_with_ids(view_schedule):
+    """Export a schedule with the element id of every row.
+
+    Revit's export says nothing about which element a row is, and a
+    schedule cannot be asked. The one reliable source is Revit itself, by
+    adding the Element Id field. That cannot be done to the schedule the
+    person is looking at, which would mean editing it, taking out a
+    worksharing checkout on it and risking leaving it changed. So the work
+    is done on a DUPLICATE inside a transaction group that is always
+    rolled back: the duplicate exists for the length of one export and the
+    original is never touched.
+    """
+    from Autodesk.Revit.DB import (
+        Transaction, TransactionGroup, TransactionStatus,
+        ViewDuplicateOption,
+    )
+
+    definition = view_schedule.Definition
+    if not definition.IsItemized:
+        raise NotRoundTrippable(
+            u"the schedule is not itemized, so a row is not one element")
+
+    doc = view_schedule.Document
+    specs = field_specs(view_schedule)
+
+    group = TransactionGroup(doc, u"AVH export element ids")
+    group.Start()
+    transaction = None
+    text = None
+    try:
+        transaction = Transaction(doc, u"AVH duplicate schedule")
+        transaction.Start()
+        duplicate_id = view_schedule.Duplicate(ViewDuplicateOption.Duplicate)
+        duplicate = doc.GetElement(duplicate_id)
+
+        schedulable, trusted = _find_id_field(duplicate.Definition, doc)
+        if schedulable is None:
+            raise NoIdField(
+                u"no Element Id field and no Element ID parameter on "
+                u"this schedule's category")
+        field = duplicate.Definition.AddField(schedulable)
+        field.ColumnHeading = TEMP_HEADING
+
+        if transaction.Commit() != TransactionStatus.Committed:
+            raise NotRoundTrippable(
+                u"Revit would not let the duplicate be edited")
+        transaction = None
+
+        text = export_schedule_text(duplicate, TAB)
+    finally:
+        if transaction is not None:
+            try:
+                transaction.RollBack()
+            except Exception:
+                pass
+        # Always. The duplicate and its field must not outlive the export.
+        group.RollBack()
+
+    table = parse_delimited(
+        text,
+        delimiter=TAB,
+        title=view_schedule.Name,
+        group_field_name=get_group_field_name(view_schedule),
+    )
+    if not extract_id_column(table):
+        raise NotRoundTrippable(u"the id column was missing from the export")
+    if len(specs) != len(table.columns):
+        raise NotRoundTrippable(
+            u"{0} columns exported but the schedule has {1} visible "
+            u"fields".format(len(table.columns), len(specs)))
+
+    table.fields = specs
+    table.meta = {
+        "schedule_id": element_id_int(view_schedule.Id),
+        "model": to_text(getattr(doc, "Title", u"")),
+        "exported": to_text(datetime.datetime.now().strftime(
+            "%Y-%m-%d %H:%M")),
+    }
+    if not trusted:
+        _verify_stamped(view_schedule, table, specs)
+    return table
+
+
+class _Rows(object):
+    """Just enough of a table for match_rows to work on a subset of rows."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+
+def _verify_stamped(view_schedule, table, specs):
+    """Keep only the stamped ids that can be trusted, then match the rest.
+
+    An id read from the Element ID parameter is used only when it belongs
+    to an element this schedule shows AND appears on exactly one row. A
+    copied element carries its source's id, so the id turns up twice, and
+    both rows lose it. An element created since the last stamping has no
+    id at all. Every row left without one is matched by value against the
+    elements nobody has claimed, which is the same rule as everywhere
+    else: one fit or no id.
+    """
+    values = collect_element_values(view_schedule, specs)
+    shown = set(values)
+    slot = table.id_index
+
+    counts = {}
+    for row in table.rows:
+        ident = row_id(table, row)
+        if ident is not None:
+            counts[ident] = counts.get(ident, 0) + 1
+
+    stamped = 0
+    for row in table.rows:
+        ident = row_id(table, row)
+        if ident is not None and ident in shown and counts[ident] == 1:
+            row[slot] = ident
+            stamped += 1
+        else:
+            row[slot] = None
+
+    todo = [row for row in table.rows if row[slot] is None]
+    by_value = 0
+    if todo and values:
+        used = set(row[slot] for row in table.rows if row[slot] is not None)
+        remaining = dict((e, v) for e, v in values.items() if e not in used)
+        ids, _tally = match_rows(_Rows(todo), specs, remaining)
+        for row, ident in zip(todo, ids):
+            if ident is not None:
+                row[slot] = ident
+                by_value += 1
+
+    total = len(table.rows)
+    left = total - stamped - by_value
+    if not stamped and not by_value:
+        raise NotRoundTrippable(
+            u"no row carried a usable Element ID and none could be "
+            u"matched by value ({0} rows)".format(total))
+    table.roundtrip_note = (
+        u"{0} of {1} rows identified by the Element ID parameter, {2} "
+        u"more by their values; {3} cannot be imported again".format(
+            stamped, total, by_value, left))
+
+
+# --- reading by matching rows to elements -----------------------------
+#
+# UNVERIFIED IN REVIT. Used when Revit offers no Element Id field, which
+# is the case on Revit 2025. Calls that carry the risk:
+# FilteredElementCollector(doc, scheduleViewId) returning exactly the
+# elements the schedule shows, and UnitUtils.ConvertFromInternalUnits.
+
+def _element_value(DB, doc, element, type_element, spec):
+    """One element's value for one column, in the column's display unit."""
+    if spec.kind == KIND_INSTANCE:
+        owner = element
+    elif spec.kind == KIND_TYPE:
+        owner = type_element
+    else:
+        return UNKNOWN
+    if owner is None:
+        return UNKNOWN
+    parameter = find_parameter(owner, spec)
+    if parameter is None:
+        return UNKNOWN
+
+    storage = parameter.StorageType
+    if storage == DB.StorageType.String:
+        return to_text(parameter.AsString())
+    if storage == DB.StorageType.Integer:
+        return int(parameter.AsInteger())
+    if storage == DB.StorageType.Double:
+        if not spec.unit_id:
+            return UNKNOWN
+        return float(DB.UnitUtils.ConvertFromInternalUnits(
+            parameter.AsDouble(), DB.ForgeTypeId(spec.unit_id)))
+    if storage == DB.StorageType.ElementId:
+        # a Level, a Phase: shown by name, which is what the export holds
+        return to_text(parameter.AsValueString())
+    return UNKNOWN
+
+
+def collect_element_values(view_schedule, specs):
+    """{element id: [value per column]} for what the schedule shows."""
+    import Autodesk.Revit.DB as DB
+
+    doc = view_schedule.Document
+    collector = DB.FilteredElementCollector(doc, view_schedule.Id)
+    collector = collector.WhereElementIsNotElementType()
+
+    values = {}
+    for element in collector:
+        ident = element_id_int(element.Id)
+        if ident is None:
+            continue
+        try:
+            type_element = doc.GetElement(element.GetTypeId())
+        except Exception:
+            type_element = None
+        row = []
+        for spec in specs:
+            try:
+                row.append(_element_value(DB, doc, element, type_element,
+                                          spec))
+            except Exception:
+                row.append(UNKNOWN)
+        values[ident] = row
+    return values
+
+
+def read_schedule_by_matching(view_schedule):
+    """A table whose rows carry element ids found by matching values.
+
+    Rows that fit no element, or more than one, get no id and are simply
+    not importable. The note on the table says how many.
+    """
+    if not view_schedule.Definition.IsItemized:
+        raise NotRoundTrippable(
+            u"the schedule is not itemized, so a row is not one element")
+
+    specs = field_specs(view_schedule)
+    table = parse_delimited(
+        export_schedule_text(view_schedule, TAB),
+        delimiter=TAB,
+        title=view_schedule.Name,
+        group_field_name=get_group_field_name(view_schedule),
+    )
+    if len(specs) != len(table.columns):
+        raise NotRoundTrippable(
+            u"{0} columns exported but the schedule has {1} visible "
+            u"fields".format(len(table.columns), len(specs)))
+
+    values = collect_element_values(view_schedule, specs)
+    if not values:
+        raise NotRoundTrippable(u"no elements could be read from the "
+                                u"schedule")
+
+    ids, tally = match_rows(table, specs, values)
+    if not tally["matched"]:
+        raise NotRoundTrippable(
+            u"no row could be matched to an element ({0} rows, {1} "
+            u"elements read)".format(tally["rows"], len(values)))
+
+    for row, ident in zip(table.rows, ids):
+        row.append(ident)
+    table.id_index = len(table.columns)
+    table.fields = specs
+    table.meta = {
+        "schedule_id": element_id_int(view_schedule.Id),
+        "model": to_text(getattr(view_schedule.Document, "Title", u"")),
+        "exported": to_text(datetime.datetime.now().strftime(
+            "%Y-%m-%d %H:%M")),
+    }
+    table.roundtrip_note = (
+        u"rows matched to elements by their values: {0} of {1} can be "
+        u"imported again ({2} not found, {3} ambiguous). {4} elements "
+        u"read; compared on: {5}".format(
+            tally["matched"], tally["rows"], tally["unmatched"],
+            tally["ambiguous"], len(values),
+            u", ".join(tally["compared"]) or u"nothing"))
+    return table

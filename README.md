@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.39.2.** The authoritative number is `__version__` in
+**Version 2.42.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -51,17 +51,11 @@ installed.
 
 ## The commands
 
-### Schedules
+The AVH tab has five panels, left to right.
 
-**Export Schedule.** Tick the schedules you want and get one AVH styled
-`.xlsx` per schedule, written to a `Schedules` folder beside the model,
-which opens when it finishes. Calibri, `#195784` headers, the AVH logo,
-grouping taken from each schedule's own Revit sort and group settings,
-quantities as real numbers with the unit in the header, and subtotals as
-live `SUM` formulas. One schedule failing never stops the others; its
-error is shown in the pyRevit output window.
+### Coordination
 
-### Worksets
+Set up once per project: links, worksets, scope boxes and the Forma view.
 
 **Create Worksets from Links.** One workset per linked model, named
 `Link_RVT_<name>` or `Link_IFC_<name>`, with both the link instance and
@@ -87,43 +81,6 @@ open is reported as exactly that. Reloading takes as long as Manage
 Links does, so large links take a while. If anything fails, the output
 window says which link, which step and why.
 
-### Tools
-
-**Flip Grid Ends.** Toggles which end bubbles show on the selected
-grids. Both visible becomes one, one visible swaps ends, none visible
-becomes both. Works on the current selection, or prompts you to pick.
-
-**Remove Level (BETA).** Moves everything off one or more levels onto a
-target level, keeping absolute elevations, then offers to delete the
-levels it emptied. Nothing is written until a dry run has been printed
-and confirmed, listing what will move and by how much, what would
-physically shift, and what cannot be moved at all.
-
-**Isolate Warnings.** Isolates every element Revit has a warning about
-in the active view. Click again and the isolate clears. Shift click to
-pick which kind of warning to isolate, since most models are mostly
-"joined but do not intersect".
-
-**Zoom to Selection.** Zooms the active view to whatever is
-selected, as one box with a margin. Stays in the view you are in and
-changes nothing in the model.
-
-**Place at Coordinate.** Type a northing, an easting and an elevation in
-shared survey coordinates and it puts an `AVH_Coordinate_Marker` there,
-hosted on the level below the point, with what you typed written into the
-marker's own parameters. Both decimal separators are accepted. After
-placing, it reads the marker's real shared coordinates back and compares
-them with what you asked for: a disagreement over a millimetre rolls the
-whole thing back rather than leaving a marker in the wrong place.
-
-The marker ships with the extension as `assets/AVH_Coordinate_Marker.rfa`
-and is loaded into the model on first use. It is a Generic Model, not
-hosted and not workplane based, origin at the intersection of the two
-reference planes, with text parameters `AVH_Easting`, `AVH_Northing`,
-`AVH_Elevation` and `AVH_Point_Name`. A parameter the family does not
-have is reported rather than fatal, so a renamed one shows up in the
-output instead of stopping the run.
-
 **Sync Scope Boxes.** Pick a linked model and its scope boxes are
 compared with the copies already in this model. The new and changed ones
 are offered in a tick list, nothing ticked to start with, and only what
@@ -140,6 +97,95 @@ assigned to the old one is moved across to it, then the old one is
 deleted and the new one renamed. The replacement has a new element id.
 Boxes that have disappeared from the link are reported and left in
 place. Copies go on `Shared Views, Levels, Grids` when the model has it.
+
+**Make Forma View.** Creates or refreshes a 3D view named after the
+model file, with annotation and analytical categories, imported DWGs and
+SATs, linked models, coordination models and lines switched off. The
+view to export to Autodesk Forma from.
+
+**Imports in Families is deliberately left on.** Sanitary ware,
+ironmongery and most manufacturer content is built from geometry
+imported into a family, and it draws on that category. Switching it off
+takes those families out of the view and out of the Forma export with
+nothing on screen to say so. Imported files are found through the
+elements that place them instead, so a site DWG goes off and a toilet
+does not.
+
+### Views
+
+Sheets on the left, visibility on the right. The two Hide commands share a pulldown.
+
+**Batch Sheets.** Makes a number of sheets at once. A window asks for
+the title block (the one most used in the model is offered first, or
+none), how many sheets, and each sheet's number and name, built like
+Rename Views/Sheets as a prefix, a field of each sheet's own and a suffix. The
+number fields count up from a start value (1, 01, 101 or A), and the
+start is offered where the model's own numbering leaves off: after A-105
+it offers A- and 106. Every field can still be edited per row. Each new
+number and name is shown as you type, in red with the reason if Revit
+would refuse it: a character Revit does not allow, a number another
+sheet already has, or two new sheets landing on one number. If Revit
+refuses any sheet, none are made.
+
+**Rename Views/Sheets.** Renames views and sheets together. Select them in the
+Project Browser (or tick them in a list if nothing is selected). A window
+shows each name split into a prefix and a suffix shared by all of them,
+and a field of each one's own between. The prefix and suffix start as
+whatever the chosen names already have in common, so changing the prefix
+changes every name while each keeps its own field; the fields can be
+edited one by one, or numbered from 1, 01, 101 or A. Each new name is
+shown as you type, in red with the reason if Revit would refuse it: a
+character Revit does not allow, two chosen views landing on one name, or
+a name another view of the same type already has. Sheets are renamed by
+name; their numbers are left alone. Names can be swapped among the
+chosen. If Revit refuses any rename, nothing is renamed.
+
+**Align Views.** Lines up views on different sheets. Select a
+viewport on a sheet (or pick a placed view from a list if nothing is
+selected), then tick the views to line up with it. Each ticked viewport
+is moved on its sheet so that the top left corner of its view's crop
+region lands exactly where the chosen view's does. The crop region is
+used rather than the viewport box, because tags and dimensions reaching
+past the crop make the box bigger. Views split into several crop regions
+use the top left of all of them together. Pinned viewports and views
+with the crop region off are skipped and listed. After moving, every
+corner is worked out again and compared; if any is more than 0.1 mm out,
+nothing is moved. Needs Revit 2023 or newer.
+
+**Hide Across Views** (under **Hide**). Hides or unhides the selected
+elements in views you pick. Shift click to work on their categories instead.
+
+**Hide in Template** (under **Hide**). Hides or unhides the categories of
+the selected elements in view templates you pick. Every view using a
+template follows it.
+
+**Flip Grid Ends.** Toggles which end bubbles show on the selected
+grids. Both visible becomes one, one visible swaps ends, none visible
+becomes both. Works on the current selection, or prompts you to pick.
+
+**Zoom to Selection.** Zooms the active view to whatever is
+selected, as one box with a margin. Stays in the view you are in and
+changes nothing in the model.
+
+### Model
+
+Site and levels. These change the model in bulk.
+
+**Place at Coordinate.** Type a northing, an easting and an elevation in
+shared survey coordinates and it puts an `AVH_Coordinate_Marker` there,
+hosted on the level below the point, with what you typed written into the
+marker's own parameters. Both decimal separators are accepted. After
+placing, it reads the marker's real shared coordinates back and compares
+them with what you asked for: a disagreement over a millimetre rolls the
+whole thing back rather than leaving a marker in the wrong place.
+
+The marker ships with the extension as `assets/AVH_Coordinate_Marker.rfa`
+and is loaded into the model on first use. It is a Generic Model, not
+hosted and not workplane based, origin at the intersection of the two
+reference planes, with text parameters `AVH_Easting`, `AVH_Northing`,
+`AVH_Elevation` and `AVH_Point_Name`. A parameter the family does not
+have is reported rather than fatal, so a renamed one shows up in the
+output instead of stopping the run.
 
 **Point Cloud to Toposolid.** Pick a linked point cloud, a point
 spacing in metres, a toposolid type and a level. The cloud is read in
@@ -182,6 +228,35 @@ that as "too thin for its given type". The confirmation warns when that
 will happen and names the highest level that works; if Revit refuses
 anyway, the tool says so in plain words instead of Revit's error dialog.
 
+**Remove Level (BETA).** Moves everything off one or more levels onto a
+target level, keeping absolute elevations, then offers to delete the
+levels it emptied. Nothing is written until a dry run has been printed
+and confirmed, listing what will move and by how much, what would
+physically shift, and what cannot be moved at all.
+
+### Check
+
+Reports and checks. Isolate Warnings and Door Room Check change only views.
+
+**Diagnose Invisibility.** Select one or more elements, pick a view, and
+it prints why each one is not visible there: workset, phase filter,
+design option, category or subcategory hidden, explicitly hidden, a view
+filter, the crop region, a 3D section box, the view range, a view
+template, an element belonging to another view, or the view's
+discipline. Reports only, changes nothing.
+
+It also reports a **visible** element whose geometry draws on a hidden
+category, which is how a toilet can be visible, selectable and not on
+screen. That check is AVH's addition.
+
+This one started as pyRevit's tool rather than AVH's, and AVH maintains
+its copy from here on rather than tracking theirs. See `THIRD_PARTY.md`.
+
+**Isolate Warnings.** Isolates every element Revit has a warning about
+in the active view. Click again and the isolate clears. Shift click to
+pick which kind of warning to isolate, since most models are mostly
+"joined but do not intersect".
+
 **Gönguhlutfall stiga.** Checks the rise and going of every stair in
 the model and nothing else: riser (uppstig), going (framstig), 2h + b,
 slope, nosing, and the same steps in every flight and on every floor of
@@ -213,58 +288,62 @@ The ISO 14122 standards are licensed to AVH for one workstation and are
 not part of this extension; the code cites clause numbers and figures
 only.
 
-**Align Views.** Lines up views on different sheets. Select a
-viewport on a sheet (or pick a placed view from a list if nothing is
-selected), then tick the views to line up with it. Each ticked viewport
-is moved on its sheet so that the top left corner of its view's crop
-region lands exactly where the chosen view's does. The crop region is
-used rather than the viewport box, because tags and dimensions reaching
-past the crop make the box bigger. Views split into several crop regions
-use the top left of all of them together. Pinned viewports and views
-with the crop region off are skipped and listed. After moving, every
-corner is worked out again and compared; if any is more than 0.1 mm out,
-nothing is moved. Needs Revit 2023 or newer.
-
-**Rename Views/Sheets.** Renames views and sheets together. Select them in the
-Project Browser (or tick them in a list if nothing is selected). A window
-shows each name split into a prefix and a suffix shared by all of them,
-and a field of each one's own between. The prefix and suffix start as
-whatever the chosen names already have in common, so changing the prefix
-changes every name while each keeps its own field; the fields can be
-edited one by one, or numbered from 1, 01, 101 or A. Each new name is
-shown as you type, in red with the reason if Revit would refuse it: a
-character Revit does not allow, two chosen views landing on one name, or
-a name another view of the same type already has. Sheets are renamed by
-name; their numbers are left alone. Names can be swapped among the
-chosen. If Revit refuses any rename, nothing is renamed.
-
-**Batch Sheets.** Makes a number of sheets at once. A window asks for
-the title block (the one most used in the model is offered first, or
-none), how many sheets, and each sheet's number and name, built like
-Rename Views/Sheets as a prefix, a field of each sheet's own and a suffix. The
-number fields count up from a start value (1, 01, 101 or A), and the
-start is offered where the model's own numbering leaves off: after A-105
-it offers A- and 106. Every field can still be edited per row. Each new
-number and name is shown as you type, in red with the reason if Revit
-would refuse it: a character Revit does not allow, a number another
-sheet already has, or two new sheets landing on one number. If Revit
-refuses any sheet, none are made.
-
-**Diagnose Invisibility.** Select one or more elements, pick a view, and
-it prints why each one is not visible there: workset, phase filter,
-design option, category or subcategory hidden, explicitly hidden, a view
-filter, the crop region, a 3D section box, the view range, a view
-template, an element belonging to another view, or the view's
-discipline. Reports only, changes nothing.
-
-It also reports a **visible** element whose geometry draws on a hidden
-category, which is how a toilet can be visible, selectable and not on
-screen. That check is AVH's addition.
-
-This one started as pyRevit's tool rather than AVH's, and AVH maintains
-its copy from here on rather than tracking theirs. See `THIRD_PARTY.md`.
+**Door Room Check.** Makes a plan of one level with an arrow at
+every door pointing into the room its CCI ID comes from, room numbers on
+both sides, and the problem doors in red. Rerun to refresh it.
 
 ### Data
+
+Schedules out to Excel and back, and the commands that write parameters for schedules to show.
+
+**Export Schedule.** Tick the schedules you want and get one AVH styled
+`.xlsx` per schedule, written to a `Schedules` folder beside the model,
+which opens when it finishes. Calibri, `#195784` headers, the AVH logo,
+grouping taken from each schedule's own Revit sort and group settings,
+quantities as real numbers with the unit in the header, and subtotals as
+live `SUM` formulas. One schedule failing never stops the others; its
+error is shown in the pyRevit output window.
+
+Since 2.40.0 every workbook also carries a hidden column with the Revit
+element id of each row and a hidden `AVH_Roundtrip` sheet holding every
+cell as exported. That is what lets **Import Schedule** work out what you
+changed. Do not delete the sheet or the column. A schedule that is not
+itemized, or that offers no Element Id field, still exports, and the
+report says it cannot be imported again.
+
+**Import Schedule.** Edit the exported workbook in Excel, save it, click
+the button and pick the file. Only the cells you changed are compared
+with the snapshot, so three edited cells touch three parameters and
+nothing else. Every change is printed to the pyRevit output window, with
+what will be skipped and why, and nothing is written until you confirm.
+One transaction does the writing.
+
+Never written: type parameters (one cell would change every element of
+the type), calculated, count and room columns, elements inside a group,
+elements another user has checked out, a text or whole number value that
+has changed in Revit since the export, and a number cell you cleared.
+Rows you delete or sort are harmless: rows are matched to elements by
+the hidden id, and nothing is ever deleted from the model.
+
+**Run it on a copy of the model first.** It has been tested only against
+a mock Revit.
+
+**Stamp Element IDs.** Revit 2025 has no Element Id field for schedules,
+so an export has to learn which element each row is some other way. This
+button copies every element's own id into an **Element ID** parameter,
+the way the Dynamo script does for doors. Pick the categories, read the
+report, confirm. Only elements that do not already hold their own id are
+written, so a second run changes nothing. It never creates the parameter:
+it must already exist (text is best) and be bound to the category. Run it
+again after copying or adding elements.
+
+Export Schedule then reads that parameter without any column being added
+to your schedule (it uses a temporary duplicate). Every id is checked: it
+must belong to an element the schedule shows and appear on one row only,
+because a copied element keeps the id of what it was copied from. A row
+without a usable id is matched by its values instead, and a row that still
+fits more than one element gets no id and is not importable. The Export
+dialog says how many rows can be imported again.
 
 **Room Data Sync (BETA).** Copies each room's `CCIMultiLevelLocationID`
 onto the furniture, casework, doors, windows and equipment inside it.
@@ -272,30 +351,11 @@ Pick the levels to cover, or cancel that picker for the whole model.
 Nothing is written until a dry run has been confirmed, and blanks being
 filled are listed separately from values being changed.
 
-**Doors > Flip Status.** Records whether each family instance is
+**Flip Status.** Records whether each family instance is
 mirrored, hand flipped or facing flipped into three Area parameters, so
 all three can be scheduled and filtered. Reports anything the parameters
 cannot take, and offers to switch on Vary Across Group Instances where
 that is what is blocking it.
-
-**Doors > Door Room Check.** Makes a plan of one level with an arrow at
-every door pointing into the room its CCI ID comes from, room numbers on
-both sides, and the problem doors in red. Rerun to refresh it.
-
-### Forma
-
-**Make Forma View.** Creates or refreshes a 3D view named after the
-model file, with annotation and analytical categories, imported DWGs and
-SATs, linked models, coordination models and lines switched off. The
-view to export to Autodesk Forma from.
-
-**Imports in Families is deliberately left on.** Sanitary ware,
-ironmongery and most manufacturer content is built from geometry
-imported into a family, and it draws on that category. Switching it off
-takes those families out of the view and out of the Forma export with
-nothing on screen to say so. Imported files are found through the
-elements that place them instead, so a site DWG goes off and a toilet
-does not.
 
 ## Version history
 
@@ -380,7 +440,10 @@ does not.
 | 2.38.0 | No files written on users' machines: Export Diagnostics removed, no trace or crash logs, temp files cleaned up | Not yet run in Revit |
 | 2.39.0 | Tools panel: Batch Sheets, numbered and named like Rename Views | Not yet run in Revit |
 | 2.39.1 | Rename Views button labelled Rename Views/Sheets | Worked |
-| 2.39.2 | Button tooltips shown in full: each `__doc__` one string, checked by test_button_tooltips.py | Current |
+| 2.39.2 | Button tooltips shown in full: each `__doc__` one string, checked by test_button_tooltips.py | Worked |
+| 2.40.0 | Schedules panel: Import Schedule, and Export Schedule now embeds element ids and a snapshot | Not yet run in Revit |
+| 2.41.0 | Revit 2025 has no Element Id schedule field: Stamp Element IDs button, stamped ids verified on export, rows matched by value as the fallback | Not yet run in Revit |
+| 2.42.0 | Tab regrouped: Coordination, Views, Model, Check and Data panels, with stacks and a Hide pulldown; Tools, Worksets, Schedules and Forma panels gone | Not yet run in Revit, current |
 
 ## Licence
 

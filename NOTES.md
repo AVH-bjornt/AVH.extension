@@ -629,6 +629,112 @@ hidden, or outside the crop, has no bounding box in that view. Its
 position in the model is used instead and the report says how many needed
 that, since zooming to nothing looks like a broken button.
 
+## Import Schedule: the round trip (2.40.0)
+
+Export is a report and does not say which element a row is. So every
+workbook now carries a hidden column of element ids (right of the table,
+so it travels with its row through a sort) and a hidden `AVH_Roundtrip`
+sheet: schedule and model, one `COL` line per column (kind, parameter id,
+display unit) and one `ROW` line per element holding every cell as
+exported. Layout and rules are in `lib/avh_schedules/roundtrip.py`.
+
+**A change is a cell that differs from its own snapshot, not from the
+model.** The display text Revit exports is rounded, so comparing with the
+live model would flag every rounded value. The price: a change made in
+Revit after the export is invisible to the comparison. The applier catches
+that for text and whole numbers (conflict, skipped, both values shown) and
+cannot for numbers with a unit. Said in the README rather than hidden.
+
+**Where the ids come from.** Revit's export has none and a schedule
+cannot be asked. The Element Id field is added to a *duplicate* schedule
+inside a `TransactionGroup` that is always rolled back, never to the one
+the person is looking at: editing the original would take a worksharing
+checkout on it and could leave it changed. If anything about this fails,
+`read_schedule` falls back to the plain export and records why in
+`roundtrip_note`, so a failure here can never cost the export. A test
+checks the rollback happens on every path, including a failed export.
+
+**First real run (Revit 2025): no Element Id field.** A window schedule
+reported `this schedule offers no Element Id field`. The diagnostic showed
+1289 schedulable fields, `ID_PARAM` = -1002100, and nothing with that id,
+so Revit 2025 does not expose Element Id as a schedule field through the
+API and the duplicate-schedule route cannot work there. It is kept for
+Revit versions that do offer it. The route that runs on 2025 is
+`lib/avh_schedules/matching.py`: collect the elements the schedule shows
+(`FilteredElementCollector(doc, scheduleViewId)`), read each column's value
+from them (doubles converted to the display unit with
+`ConvertFromInternalUnits`, never through a string), and give a row an id
+only when EXACTLY ONE element fits. Ambiguous, unmatched and contested
+rows get no id and are ignored by the import; the Export report says how
+many of the rows can be imported again. Text columns must be equal and
+number columns agree to the rounding the column shows; a row nothing fits
+is retried on its text columns alone. `test_matching.py` (20 checks,
+mutation tested) covers it, `test_roundtrip.py` covers the Revit side
+against a mock.
+
+**UNVERIFIED for matching:** that the collector returns exactly the
+elements the schedule shows, that Level style (ElementId storage) columns
+equal `AsValueString()`, and that grouped or filtered schedules behave.
+A schedule with no unique column (no Mark, nothing distinguishing) will
+match few rows, by design.
+
+**Element ID parameter (2.41.0).** The matching route cannot separate
+rows that are identical in every column, which a window schedule without a
+Mark is (24 of 27 ambiguous on the first real run). The fix chosen was the
+one AVH already used for doors in Dynamo: stamp each element's id into an
+`Element ID` parameter. `stamper.py` plans and writes it (never creates the
+parameter; skips groups, other users' elements, read only, an id too big
+for Integer; writes only what differs). The export finds the parameter by
+NAME among the schedulable fields (`stamp.is_stamp_name`, normalised, so
+Element ID / ElementID / AVH Element ID all count), adds it to the
+temporary duplicate, and verifies every id in `reader._verify_stamped`: it
+must be an element the schedule shows and appear on exactly one row, then
+rows left without one are matched by value against the unclaimed
+elements. A copied element keeps its source's stamp, so duplicates lose it
+for both rows by design. Tests: `test_stamping.py` (33 checks) and section
+8 of `test_roundtrip.py`; the stale copy, wrong element, blank stamp and
+value fallback are each mutation tested.
+
+**UNVERIFIED:** that GetSchedulableFields lists the project parameter on
+the schedule's category, `ParameterBindings` iteration, `OfCategoryId`.
+
+**Not written, with a reason each:** type parameters (the user chose skip
+and report), calculated/count/room columns, group members (Revit's
+unignorable Ungroup dialog, as Flip Status found), elements owned by
+another user, read only parameters, conflicts, a cleared number cell (a
+blank must not become a zero), a unit that is unknown.
+
+**Numbers never pass through a string.** A cell is a real number from the
+file, converted with `UnitUtils.ConvertToInternalUnits` from the unit
+recorded at export and set as a double.
+
+**UNVERIFIED IN REVIT. Never run against a real model.** The calls that
+carry the risk, to check first: (1) that `GetSchedulableFields` offers
+`ID_PARAM`; (2) that `Parameter.Id` equals `ScheduleField.ParameterId`
+(a by-name fallback exists); (3) `ScheduleField.GetSpecTypeId` and
+`FormatOptions.GetUnitTypeId`, Revit 2021+; (4) `Element.GroupId`;
+(5) that exported columns equal the visible fields one to one (checked at
+run time, and refused if not). The mock cannot answer any of these, and
+`test_roundtrip.py`'s mock was written from the same assumptions as the
+code. Run on a copy.
+
+Tests: `python test_roundtrip.py` (78 checks). It edits real workbooks
+with openpyxl, which saves the way Excel does (shared strings), so the
+reader meets the real shape. Mutation tested: ignoring the commit status,
+ignoring what `Set` returns, writing type parameters, writing group
+members, skipping the conflict check, rewriting an equal number, ignoring
+duplicate ids, treating every cell as changed, not rolling the temporary
+group back, and exporting the original instead of the duplicate each fail
+checks. The Import button script is covered by
+`test_import_schedule_harness.py` (22 checks, mocked pyrevit and Revit):
+confirm and decline, cancelled picker, unedited workbook, type-only edit,
+non-AVH and corrupt files, another model, rolled-back commit, conflict.
+Mutation tested: skipping the confirmation, the model prompt, the dry run
+report and the no-changes exit each fail checks.
+
+No icon yet: `ImportSchedule.pushbutton` has none, so it shows pyRevit's
+default. Make one the way the others were (96px, light interior).
+
 ## Why the rewrite
 
 Four releases failed in Revit before the cause was found, and the cause was
@@ -912,30 +1018,55 @@ AVH.extension/
     model.py    what moves, picker labels and the tally, no Revit
     links.py    which link workset is the datum one, what stays open, no Revit
   AVH.tab/
-    Schedules.panel/
-      ExportSchedule.pushbutton/
-    Worksets.panel/
-      Create Worksets From Links.pushbutton/
-      Datums to Workset.pushbutton/
-      Close Link Datums.pushbutton/
-    Tools.panel/
-      Flip Grid Ends.pushbutton/
-      Remove Level.pushbutton/
-      Isolate Warnings.pushbutton/
-      Selection.pulldown/
-        Zoom To Selection.pushbutton/
-    Data.panel/
-      Room Data Sync.pushbutton/
-      Doors.pulldown/
-        Flip Status.pushbutton/
-        Door Room Check.pushbutton/
-    Forma.panel/
+    Coordination.panel/
+      Links.stack/
+        Create Worksets From Links.pushbutton/
+        Datums to Workset.pushbutton/
+        Close Link Datums.pushbutton/
+      Sync Scope Boxes.pushbutton/
       Make Forma View.pushbutton/
+    Views.panel/
+      Sheets.stack/
+        Batch Sheets.pushbutton/
+        Rename Views.pushbutton/
+        Align Views.pushbutton/
+      Visibility.stack/
+        Hide.pulldown/
+          Hide Across Views.pushbutton/
+          Hide in Template.pushbutton/
+        Flip Grid Ends.pushbutton/
+        Zoom To Selection.pushbutton/
+    Model.panel/
+      Place at Coordinate.pushbutton/
+      Point Cloud to Toposolid.pushbutton/
+      Remove Level.pushbutton/
+    Check.panel/
+      Diagnose Invisibility.pushbutton/
+      Checks.stack/
+        Isolate Warnings.pushbutton/
+        Stair Ratio.pushbutton/
+        Door Room Check.pushbutton/
+    Data.panel/
+      ExportSchedule.pushbutton/
+      ImportSchedule.pushbutton/
+      Parameters.stack/
+        StampElementIds.pushbutton/
+        Room Data Sync.pushbutton/
+        Flip Status.pushbutton/
 ```
 
-`Doors.pulldown` is a pulldown, so the two buttons inside it share one
-ribbon slot. The folder name is the label and `icon.png` beside the
-buttons is its icon; nothing else is needed. **Nesting a button one level
+Regrouped at 2.42.0 by what the user is doing: set up the project
+(Coordination), work on views and sheets (Views), change the model in
+bulk (Model), check it (Check), or move data in and out (Data). Order on
+the ribbon comes from the `layout:` list in each `bundle.yaml`, at tab,
+panel, stack and pulldown level; a folder missing from a `layout:` list
+is appended after the listed ones, so add new buttons to the list.
+
+A `.stack` holds at most three items, shown small and on top of one
+another, so every button in a stack needs a legible 16 px icon. A
+`.pulldown` shares one ribbon slot: the folder name is the label and
+`icon.png` beside the buttons is its icon. A pulldown can sit inside a
+stack, as `Hide.pulldown` does. **Nesting a button one level
 deeper broke how every script found `lib`**, which they all did by
 walking up a fixed number of directories from `__file__`. They now search
 upward for the folder that contains `lib`, which does not care how deep
@@ -993,6 +1124,10 @@ python test_door_room_check_harness.py
 python test_zoom_selection_harness.py
 python test_datums_workset_harness.py
 python test_close_link_datums_harness.py
+python test_roundtrip.py
+python test_matching.py
+python test_stamping.py
+python test_import_schedule_harness.py
 python test_hide_in_template_harness.py
 python test_hide_across_views_harness.py
 ```
