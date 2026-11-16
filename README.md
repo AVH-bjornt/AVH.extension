@@ -4,11 +4,12 @@ A pyRevit extension holding AVH's in house Revit tools: schedule export
 to AVH styled Excel, workset housekeeping, and a set of modelling and
 checking tools.
 
-No dependencies. Nothing to `pip install`, nothing bundled: the whole
-extension is the Python standard library plus the Revit API. It runs on
-pyRevit's IronPython engine.
+No dependencies. Nothing to `pip install`: the Python is the standard
+library plus the Revit API, on pyRevit's IronPython engine. The one
+thing bundled is three.js, a JavaScript file the Clash Detector's viewer
+draws with (see `THIRD_PARTY.md`).
 
-**Version 2.43.1.** The authoritative number is `__version__` in
+**Version 2.45.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -241,6 +242,49 @@ physically shift, and what cannot be moved at all.
 
 Reports and checks. Isolate Warnings and Door Room Check change only views.
 
+**Clash Detector.** Finds elements that occupy the same space and shows
+them in a 3D viewer in a window beside Revit.
+
+Pick **model A** and **model B**: this model, any loaded link, all links
+together, this model and all its links, or what is selected in Revit
+(**Use Revit selection as A**). Below them is one list of every category
+either model has, under discipline headings (Architecture, Interior,
+Structure, MEP Mechanical, Plumbing and Electrical, Site). Each row has
+an **A** and a **B** button: A puts that category from model A in the
+first set, B puts it from model B in the second. A button is dashed out
+where its model has none of that category; with two different models
+the count reads A / B. The A and B buttons on a heading switch that
+whole discipline, the ones at the top switch every row shown, and Find
+category narrows the list.
+
+**Presets** set the buttons in one click: Structure × MEP, Architecture
+× MEP, MEP × MEP, Everything × everything, or Clear both. **Options**
+holds where to look (the whole model, or what the active view shows and
+its section box) and the geometry detail. **Tolerance** beside Run leaves
+out clashes shallower than that, and can be changed afterwards in the
+list. **Refresh from Revit** reads the links and the selection again.
+
+Revit intersects the two solids of every pair close enough to matter,
+so a clash comes with its volume and depth, and the shared volume is
+drawn in red. Geometry that is not solid, as in many IFC links, is
+tested on its triangles and marked approximate, with no volume.
+
+In the viewer: the list groups by category pair, level or element,
+sorts by depth or volume, searches, and can ignore clashes shallower
+than a tolerance. Click a clash, a marker or an element to fly to it.
+Pull apart moves the two elements away from each other, Cut slices
+through them, Tour steps through the list by itself, Orbit turns round
+the clash. Up and Down move through the list, R marks one reviewed, F
+frames it, A shows everything, Space starts the tour.
+
+**Select in Revit** selects the pair and zooms the active view to it.
+**Section box in Revit** puts the active 3D view's section box round the
+clash, which is the only thing the tool writes to the model; Undo puts
+it back. Reviewed marks last until the window closes.
+
+Shift click opens the window modal, for a machine where the ordinary
+window does not respond. Revit cannot be used while that one is open.
+
 **Diagnose Invisibility.** Select one or more elements, pick a view, and
 it prints why each one is not visible there: workset, phase filter,
 design option, category or subcategory hidden, explicitly hidden, a view
@@ -458,7 +502,12 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.42.0 | Tab regrouped: Coordination, Views, Model, Check and Data panels, with stacks and a Hide pulldown; Tools, Worksets, Schedules and Forma panels gone | Stamp stack skipped on a reload: the old button's name was still on the ribbon; a restart clears it |
 | 2.42.1 | Icons for Import Schedule and Stamp Element IDs | Not yet run in Revit |
 | 2.43.0 | Update panel: Update AVH pulls the newest version from GitHub and reloads pyRevit | Not yet run in Revit |
-| 2.43.1 | Icon for Update AVH | Not yet run in Revit, current |
+| 2.43.1 | Icon for Update AVH | Not yet run in Revit |
+| 2.44.0 | Check panel: Clash Detector, a three.js viewer in a WebView2 window | Window opened in Revit; the set lists stayed empty and Run said "Set A is empty" |
+| 2.44.1 | Clash Detector: quick setups, Refresh from Revit, Run off until the models are listed, errors shown and logged, an empty set says why | Named the cause: IronPython's `json.dumps` raised on an "ö" in a category name |
+| 2.44.2 | Clash Detector: messages to the viewer written by AVH's own JSON encoder, plain ASCII whatever the names hold | Never reached Revit: the persistent engine kept running the 2.44.0 window module |
+| 2.44.3 | Clash Detector: each new window reloads its modules from disk | Not yet run in Revit |
+| 2.45.0 | Clash Detector setup: model A and model B, one category list with A and B buttons under discipline headings, presets, tolerance beside Run | Not yet run in Revit, current |
 
 ## Licence
 

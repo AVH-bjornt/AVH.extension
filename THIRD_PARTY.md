@@ -57,6 +57,28 @@ that is a fresh decision with the AVH additions to carry across by hand.
 Every other file in this extension imports pyRevit's libraries, which is
 ordinary use of the platform rather than copying from it.
 
+## three.js
+
+<https://threejs.org>, MIT licence, copyright 2010-2024 three.js
+authors.
+
+**AVH > Check > Clash Detector** draws its 3D view with three.js
+release 170, taken unmodified from the npm package `three@0.170.0` on
+16 November 2026:
+
+```
+lib/avh_clash/web/vendor/three.module.min.js    from build/
+lib/avh_clash/web/vendor/OrbitControls.js       from examples/jsm/controls/
+lib/avh_clash/web/vendor/THREE-LICENSE.txt      its LICENSE
+```
+
+It is bundled rather than loaded from a CDN so the viewer works with no
+network. MIT is compatible with this extension's GPL v3; the licence
+file travels with the code as MIT asks. To update, replace the two
+files from a newer package and check the viewer in a browser
+(`python -m http.server` in `lib/avh_clash/web`, which runs on made up
+data when there is no Revit behind it).
+
 ## pyApex
 
 <https://apex-project.github.io/pyApex>, GPL v3.

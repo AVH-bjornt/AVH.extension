@@ -818,7 +818,7 @@ LibreOffice recalculation. The three level door header round trips exactly:
 `L3:O3` for Measurements (mm), `L4:M4` Gatmál, `N4:O4` Rough Measurements,
 Breidd / Hæð beneath.
 
-## Unicode: three rules, all learned by breaking them
+## Unicode: the rules, all learned by breaking them
 
 These schedules are full of Icelandic room names and m² / m³ units, and
 Python 2 is unforgiving about all of it.
@@ -838,6 +838,29 @@ Python 2 is unforgiving about all of it.
 
 `test_ironpython_compat.py` enforces all three statically, because a hand
 written checklist missed rules 1 and 2 in consecutive releases.
+
+### A fifth: never `json.dumps` on IronPython
+
+Learned at 2.44.1, from the Clash Detector's model list never arriving:
+
+```
+File "json\encoder.py", line 47, in py_encode_basestring_ascii
+UnicodeDecodeError: 'unknown' codec can't decode byte 0xf6
+```
+
+IronPython 2.7's `json` encoder checks whether a `str` holds bytes above
+0x7f and, if so, decodes it as UTF-8. On CPython 2 that is a byte
+string. On IronPython `str` and `unicode` are one type, so every
+non-ASCII name gets "decoded" again and the first "ö" ends it. CPython
+3, where the tests run, has no such step, so no test run can see it.
+
+`avh_clash.model.to_json` writes the messages instead, escaping every
+character outside printable ASCII as `\uXXXX`. The Clash Detector
+harness reads `lib/avh_clash` and fails if `json.dumps` appears there
+again, which is the only check that can catch it outside Revit.
+`json.loads` is believed safe (text that is already unicode is never
+decoded), and the window reports a message it cannot read rather than
+dropping it.
 
 ### A fourth, which contradicts the first three: pushbutton scripts are ASCII
 
@@ -1041,6 +1064,7 @@ AVH.extension/
       Point Cloud to Toposolid.pushbutton/
       Remove Level.pushbutton/
     Check.panel/
+      Clash Detector.pushbutton/
       Diagnose Invisibility.pushbutton/
       Checks.stack/
         Isolate Warnings.pushbutton/
@@ -1152,6 +1176,8 @@ python test_stamping.py
 python test_import_schedule_harness.py
 python test_hide_in_template_harness.py
 python test_hide_across_views_harness.py
+python test_clash_model.py
+python test_clash_detector_harness.py
 ```
 
 `test_edge_cases.py` and `test_script_harness.py` need **openpyxl**
@@ -1871,6 +1897,175 @@ alarm, it is every real one after it.
 same job. They are deliberately not shared yet: folding them into one
 reader moves both buttons at once and neither has been run in Revit.
 Fold them once both are confirmed.
+
+## Clash Detector (2.44.0)
+
+Elements -> solids -> triangles -> a three.js scene in a WebView2, with
+the clash test itself done by Revit on the solids.
+
+```
+lib/avh_clash/
+  model.py     boxes, candidate pairs, the triangle test, mesh packing. No Revit
+  reader.py    Revit elements -> solids -> triangles; the exact test
+  service.py   what the window can ask for: inventory, run, select, section box
+  window.py    WPF window + WebView2 + the ExternalEvent
+  web/         index.html, app.css, app.js (the page), viewer.js (the scene),
+               demo.js (a made up building, browser only), vendor/ (three.js)
+```
+
+**The test is two phases.** Bounding boxes first, by a sweep along x
+(`model.candidate_pairs`), then each surviving pair for real. Boxes that
+only touch are not candidates: a wall standing on a floor shares a plane
+with it, and skipping it there saves a boolean per wall.
+
+**Revit does the real test, not the triangles.**
+`BooleanOperationsUtils.ExecuteBooleanOperation(a, b, Intersect)` gives
+the shared solid, so a clash has a volume, a depth (the thinnest
+dimension of the overlap's box, which over-reads on rotated geometry
+and so never hides a real clash behind the tolerance) and a mesh to draw
+in red. An overlap under one cubic centimetre is treated as touching.
+
+**The triangle test is the fallback, and says so.** A boolean that
+raises, a raw `Mesh` (many IFC links), an open shell, or a linked solid
+that will not transform is tested by looking for an edge of one mesh
+going through a triangle of the other. It reports "approximate", with no
+volume and no depth, because surfaces crossing says where, not how much.
+Two things in it were learned from the test suite rather than thought of:
+
+- A crossing has to be strictly inside the triangle, not on its edge.
+  The first version allowed the edge, and a floor clashed with every
+  wall standing on it: the floor's top face is two triangles, and their
+  shared diagonal runs under the wall's foot, exactly through the bottom
+  edge of its side faces.
+- One element wholly inside another crosses no surface at all, so that
+  is a separate ray count.
+
+**Coordinates are metres from the middle of the run**, not feet from the
+internal origin. The viewer holds positions as float32, and a
+georeferenced model far from its origin would lose its millimetres.
+`Service.last` keeps each clash's box in feet for going back to Revit.
+
+**Geometry travels as base64 inside JSON messages**
+(`PostWebMessageAsJson`), float32 positions and uint32 indices, several
+meshes to a message of about a megabyte. No temp files. The viewer
+merges everything into one mesh per set, so the frame costs two draw
+calls however many elements there are, and renders only when something
+changed. Elements that clash with nothing are sent last and stop at 1.5
+million triangles; clashing ones are always sent whole.
+
+**The window is modeless and that is the risky part.** A modeless window
+is outside the API context, so `run`, `select` and `sectionbox` are
+queued and run from an `ExternalEvent`, and the button sets
+`__persistentengine__` so the engine that owns the window is not thrown
+away when the script ends. Shift click opens it with `ShowDialog`
+instead, where the handlers are still inside the command and need no
+event: the way round if the event route fails on some machine. During a
+run the dispatcher is pumped between pairs so progress paints and Cancel
+arrives, the way pyRevit's own progress bar does it.
+
+**A persistent engine keeps its modules.** `__persistentengine__` keeps
+one IronPython engine for the button so the window outlives the click,
+and that engine keeps everything it has imported, through a pyRevit
+reload. Only `script.py` is read again on each click. So 2.44.2's fix to
+`window.py` sat on disk while Revit kept running the 2.44.0 copy, and
+the traceback named a line of code that was no longer in the file. When
+a traceback disagrees with the file, this is the first thing to suspect.
+
+Since 2.44.3 the button reloads `lib/avh_clash` (model, reader, service,
+window, in that order) every time it opens a new window. It does not
+when it only brings an open window forward, because that window is
+still running the code it was made with; close it first to pick up a
+change. The harness proves both: a stale `Service` planted in the loaded
+module must be replaced by a new window and left alone by bringing one
+forward.
+
+**The setup is two models and one list (2.45.0).** Asked for after the
+first working run, from a mock-up: pick model A and model B, then an A
+and a B button per category. The page keeps a model choice and a set of
+category ids per side, and the categories survive a change of model, so
+switching B from one link to another keeps what was on. "All links" and
+"This model and all links" are page-side choices only: `runConfig`
+expands each into one entry per real source, carrying the ticked
+categories that source has, so the service is unchanged and a pair
+between two links is tested like any other.
+
+The discipline headings come from `reader.DISCIPLINES`, `BuiltInCategory`
+names grouped by hand, sent per category as `group` with the heading
+order as `groups`. They are matched on the enum, not the name, so they
+hold in any interface language and for any link; a category not in the
+table is listed under Other rather than dropped. The grouping is a
+judgement (railings under Interior, slab edges under Structure, as in
+the mock-up), so move entries freely.
+
+**WebView2 comes from Revit.** 2024 to 2027 all ship
+`Microsoft.Web.WebView2.{Core,Wpf}.dll` in the install folder, so
+nothing is bundled but three.js. The page is served through a virtual
+host (`https://avh-clash.example/`) mapped to `lib/avh_clash/web`,
+because a `file://` page may not load JavaScript modules.
+
+**One exception to "no files on users' machines".** WebView2 will not
+start without a browser profile folder, and its default is beside
+Revit.exe in Program Files, which is not writable. It goes in
+`%TEMP%\avh_clash_wv2_<process id>`, is deleted when the window closes,
+and one left by a Revit that has gone is deleted at the next start.
+
+**Working on the viewer needs no Revit.** `python -m http.server` in
+`lib/avh_clash/web` and open it in a browser: with no WebView2 host
+behind it, `app.js` loads `demo.js`, which answers the same messages
+with a three storey box of walls, pipes and ducts. That is how the page
+was checked at 2.44.0, in light and dark.
+
+test_clash_model.py covers the arithmetic and the JSON (90 checks); the harness (114)
+runs the real script and service against a fake Revit made of boxes,
+where a boolean is the box two boxes share and a link sits somewhere
+else. Mutations caught: commit status ignored (1), link solids not
+moved into place (crash), link boxes not transformed (crash), volume
+left in cubic feet (1), an element paired with itself (6), touching
+counted as going through (4), cancel ignored (2), section box ignored
+(1), a run after the window closed (1).
+
+### The first run in Revit (2.44.0 -> 2.44.1)
+
+The window opened, so WebView2, the virtual host and three.js all
+loaded. But the Set A and Set B lists stayed empty, and Run answered
+"Set A is empty". That is exactly what a page that never received
+`init` does: the trees stay blank, and Run, which was only disabled
+once `init` had arrived, sends two empty sets. The Python side posted
+`init` inside a `try` that swallowed every failure, so whatever stopped
+it said nothing.
+
+2.44.1 did not guess at the cause; it made the next run say, and the
+first run of it did: IronPython's `json.dumps` raised on an "ö" in a
+category name (see "A fifth: never `json.dumps` on IronPython" under
+Unicode). 2.44.2 writes the messages with `model.to_json`. What 2.44.1
+added stays, because it is what found this:
+
+- `window.post` no longer swallows: a message that cannot be sent is
+  logged to the pyRevit output and an error naming it goes to the page.
+- The page reports its own exceptions (`window.onerror`, rejected
+  promises, a throw in `applyInit`) as a red box and sends them to the
+  pyRevit log through a `log` message.
+- Run starts disabled. If no `init` arrives within six seconds the page
+  says so, and **Refresh from Revit** asks for it again through the
+  ExternalEvent.
+- A set that comes back empty carries a tally (`why`): entries sent,
+  categories ticked, elements looked at, matched, without a 3D extent,
+  and outside the section box. The page turns it into a sentence that
+  names the step that emptied it.
+
+The same release adds what the first test asked for: quick setups
+(this model against its links, against itself, the Revit selection
+against everything) and the refresh, which also picks up a selection
+made after the window opened.
+
+Unverified in Revit beyond the window opening. The calls that carry
+the risk are listed at the top of `reader.py` and `window.py`. If the
+window opens blank or not at all, shift click first: that separates a
+WebView2 problem from an ExternalEvent one.
+
+Not done: clearance (near miss) tests, clash status that survives
+closing the window, a report to Excel, and view visibility for linked
+elements (a link is tested whole unless the view has a section box).
 
 ## Update AVH: measured, not trusted
 
