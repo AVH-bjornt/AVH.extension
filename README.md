@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.42.0.** The authoritative number is `__version__` in
+**Version 2.43.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -37,8 +37,11 @@ open.
 
 ### Updates
 
-The extension installs as a git clone, so pyRevit's own Update tool
-brings in new versions. Nobody needs a new file after their first
+The extension installs as a git clone, so it can update itself. Click
+**Update AVH** on the AVH tab: it pulls the newest version from GitHub
+and reloads pyRevit, for you only, and touches nothing else. pyRevit's
+own Update tool works too, but updates pyRevit and every other
+extension along with it. Nobody needs a new file after their first
 install.
 
 ### It will not appear in the Extension Manager
@@ -51,7 +54,7 @@ installed.
 
 ## The commands
 
-The AVH tab has five panels, left to right.
+The AVH tab has six panels, left to right.
 
 ### Coordination
 
@@ -357,6 +360,15 @@ all three can be scheduled and filtered. Reports anything the parameters
 cannot take, and offers to switch on Vary Across Group Instances where
 that is what is blocking it.
 
+### Update
+
+**Update AVH.** Gets the newest AVH tools from GitHub and reloads
+pyRevit. Only this extension, only on the computer it is clicked on.
+If you already have the newest version it says so and does nothing.
+If a button that moved to another panel does not show afterwards, or
+shows twice, restart Revit. If it says the copy was not installed from
+GitHub, run `Install_AVH_Extensions.bat` once.
+
 ## Version history
 
 | Version | Change | Outcome |
@@ -443,7 +455,9 @@ that is what is blocking it.
 | 2.39.2 | Button tooltips shown in full: each `__doc__` one string, checked by test_button_tooltips.py | Worked |
 | 2.40.0 | Schedules panel: Import Schedule, and Export Schedule now embeds element ids and a snapshot | Not yet run in Revit |
 | 2.41.0 | Revit 2025 has no Element Id schedule field: Stamp Element IDs button, stamped ids verified on export, rows matched by value as the fallback | Not yet run in Revit |
-| 2.42.0 | Tab regrouped: Coordination, Views, Model, Check and Data panels, with stacks and a Hide pulldown; Tools, Worksets, Schedules and Forma panels gone | Not yet run in Revit, current |
+| 2.42.0 | Tab regrouped: Coordination, Views, Model, Check and Data panels, with stacks and a Hide pulldown; Tools, Worksets, Schedules and Forma panels gone | Stamp stack skipped on a reload: the old button's name was still on the ribbon; a restart clears it |
+| 2.42.1 | Icons for Import Schedule and Stamp Element IDs | Not yet run in Revit |
+| 2.43.0 | Update panel: Update AVH pulls the newest version from GitHub and reloads pyRevit | Not yet run in Revit, current |
 
 ## Licence
 

@@ -1100,6 +1100,21 @@ mass on dark grey, which is the same trap that got the navy arrow
 rejected. The light interior is what carries it on both themes, and the
 first two attempts at this icon were redone for exactly that reason.
 
+Import Schedule is Export's table turned round: the same green arrow, but
+on the left and pointing into the table, and the highlighted row is green
+for the edited cells being written back. Stamp Element IDs is the table
+with an amber rubber stamp pressing on its lower right, cut out from the
+table by a transparent gap so the two do not merge at 16 px. Both were
+drawn in code (no image library on this machine) and checked at 96, 32
+and 16 px on Revit's light and dark ribbon greys. They sit in or beside
+a stack, where they show at 16 px.
+
+After moving buttons between panels or into a stack, restart Revit
+rather than reloading pyRevit. Revit cannot remove a ribbon item, and a
+stack is added in one call that fails if any name in it is still on the
+ribbon: at 2.42.0 a reload logged "Stack 'Parameters' skipped: The name
+already exists:StampElementIds".
+
 They are **96x96**, which is pyRevit's stated maximum. They shipped at
 128px until 2.5.1 and pyRevit logged a warning on every startup, since
 oversized icons have to be rescaled for screen scaling at load time.
@@ -1110,6 +1125,7 @@ Run from inside `AVH.extension`, outside Revit:
 
 ```
 python test_ironpython_compat.py
+python test_update_harness.py
 python test_against_real_exports.py
 python test_edge_cases.py
 python test_script_harness.py
@@ -1849,6 +1865,38 @@ alarm, it is every real one after it.
 same job. They are deliberately not shared yet: folding them into one
 reader moves both buttons at once and neither has been run in Revit.
 Fold them once both are confirmed.
+
+## Update AVH: measured, not trusted
+
+The button reuses pyRevit's own updater (`updater.update_repo`, which is
+`git_pull` on LibGit2Sharp) on this one repository, so the pull path is
+the one `pyrevit extend ui` and pyRevit's Update button already use.
+
+`git_pull` discards LibGit2Sharp's `MergeResult`, so a pull that merged
+nothing looks the same as one that worked. `lib/avh_update` therefore
+decides the outcome from the head commit before and after and from how
+far the branch is still behind its remote after the pull's fetch. Still
+behind is reported as "did not go through", never as "up to date".
+
+A clone with commits that are not on GitHub is refused before any pull.
+On a user's machine that cannot happen; on the development clone a pull
+would create a merge commit signed with the Revit user's name. Use git
+there.
+
+It reloads only when the head moved. A reload cannot remove ribbon items,
+so after a release that moves buttons between panels the dialog says to
+restart Revit (see the 2.42.0 stack failure above).
+
+test_update_harness.py drives the library against real temporary git
+repositories (behind, ahead, hand edited, not a clone, no upstream) with
+the git command line standing in for LibGit2Sharp, then runs the button
+script against a mocked pyrevit. Mutations caught: ignoring "still
+behind" (1 check), dropping the local commit refusal (4), reloading
+always (4), not re-measuring the head after a failed pull (1), not
+disposing repositories (1).
+
+Unverified in Revit: `Repository.Discover`, `compare_branch_heads` on a
+clone made by `pyrevit extend ui`, and `update_repo` called directly.
 
 ## Working on this
 
