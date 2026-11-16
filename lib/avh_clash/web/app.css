@@ -22,6 +22,7 @@
   --a: #1f6fb2;
   --b: #c9821a;
   --clash: #d8332a;
+  --soft: #9a3fc2;
   --done: #7d8b96;
   --ok: #2c8a57;
   --focus: #0b74d1;
@@ -47,6 +48,7 @@
     --a: #4f9fdc;
     --b: #e0a03a;
     --clash: #f0564b;
+    --soft: #c487ea;
     --done: #66737d;
     --ok: #4fb47d;
     --focus: #6cb6f5;
@@ -280,6 +282,9 @@ button.small:not(.primary):hover { border-color: var(--ink-3); }
 }
 .clash:hover { background: var(--rule-soft); }
 .clash[aria-current="true"] { background: color-mix(in srgb, var(--clash) 9%, var(--panel)); border-left-color: var(--clash); }
+.clash.soft { border-left-color: color-mix(in srgb, var(--soft) 35%, transparent); }
+.clash.soft[aria-current="true"] { background: color-mix(in srgb, var(--soft) 10%, var(--panel)); border-left-color: var(--soft); }
+.clash.soft .measure { color: var(--soft); }
 .clash .number { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding-top: 1px; }
 .clash .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clash .names { grid-column: 2; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -308,6 +313,39 @@ button.small:not(.primary):hover { border-color: var(--ink-3); }
 .swatch.b { background: var(--b); }
 .swatch.clash { background: var(--hatch), color-mix(in srgb, var(--clash) 22%, transparent); outline: 1px solid var(--clash); outline-offset: -1px; }
 .swatch.dot { background: var(--clash); border-radius: 50%; }
+.swatch.dot.soft { background: var(--soft); }
+.swatch.soft { background: color-mix(in srgb, var(--soft) 25%, transparent); outline: 1px dashed var(--soft); outline-offset: -1px; }
+.soft-word { color: var(--soft); font-weight: 600; }
+
+.kinds { display: flex; border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.kinds button {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--paper);
+  border: 0; border-right: 1px solid var(--rule); padding: 5px 6px; font-size: 12px; color: var(--ink-2);
+}
+.kinds button:last-child { border-right: 0; }
+.kinds button[aria-pressed="true"] { background: var(--navy); color: var(--on-navy); }
+.kinds button span[data-count] { font-family: var(--mono); font-size: 11px; opacity: .8; }
+
+.clear-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--ink-2); font-size: 12px; cursor: pointer; }
+.clear-line input[type="checkbox"] { accent-color: var(--soft); margin: 0; }
+.mm-input {
+  display: inline-flex; align-items: center; gap: 3px; border: 1px solid var(--rule); border-radius: 3px;
+  background: var(--paper); padding: 0 6px;
+}
+.mm-input input { width: 46px; border: 0; background: none; color: var(--ink); font: 13px var(--mono); text-align: right; padding: 3px 0; }
+.mm-input input:focus-visible { outline: none; }
+.mm-input:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
+.mm-input span { font-family: var(--mono); font-size: 12px; }
+.clear-cats { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+.clear-cat {
+  background: var(--paper); border: 1px dashed var(--rule); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--ink-2);
+}
+.clear-cat[aria-pressed="true"] {
+  border-style: solid; border-color: var(--soft); color: var(--ink);
+  background: color-mix(in srgb, var(--soft) 16%, var(--paper));
+}
+.clear-cat:disabled { opacity: .45; cursor: default; }
+#clearance-fold:has(#clearance-on:not(:checked)) .clear-cats { opacity: .45; pointer-events: none; }
 
 .legend, .toolbar, .card {
   position: absolute; background: color-mix(in srgb, var(--panel) 94%, transparent);
@@ -352,6 +390,8 @@ button.small:not(.primary):hover { border-color: var(--ink-3); }
   outline: 1px solid var(--clash); outline-offset: -1px;
 }
 .card .kind.approx { color: var(--ink-2); }
+.card .kind.soft { color: var(--soft); }
+.card .kind.soft::before { background: color-mix(in srgb, var(--soft) 25%, transparent); outline: 1px dashed var(--soft); }
 .card .kind.approx::before { background: none; outline: 1px dashed var(--ink-3); }
 .icon { margin-left: auto; background: none; border: 0; color: var(--ink-3); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
 .icon:hover { background: var(--rule-soft); color: var(--ink); }

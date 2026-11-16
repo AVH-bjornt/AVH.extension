@@ -401,6 +401,205 @@ def mesh_clash(pos_a, idx_a, box_a, pos_b, idx_b, box_b):
 
 
 # --------------------------------------------------------------------------
+# Distance between surfaces, for clearance zones (soft clashes)
+#
+# Two elements that do not clash can still be too close: a pipe needs
+# room round it for insulation, hangers and hands. The gap is measured
+# between the two triangle surfaces, the same triangles the viewer
+# draws, so it works the same for a pipe, a fitting, a beam or a mesh.
+#
+# A curved surface is drawn as flat facets inside the true surface, so
+# the gap to a pipe reads a little wide: at most r(1 - cos(pi / n)) for
+# n facets round, under 1 mm for a DN100 pipe at medium detail.
+# --------------------------------------------------------------------------
+
+def _minus(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _along(a, d, t):
+    return (a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t)
+
+
+def _clamp(value):
+    return 0.0 if value < 0.0 else (1.0 if value > 1.0 else value)
+
+
+def closest_on_triangle(p, a, b, c):
+    """The point of triangle a-b-c nearest to p (Ericson, Real-Time
+    Collision Detection, 5.1.5)."""
+    ab = _minus(b, a)
+    ac = _minus(c, a)
+    ap = _minus(p, a)
+    d1 = _dot(ab, ap)
+    d2 = _dot(ac, ap)
+    if d1 <= 0.0 and d2 <= 0.0:
+        return a
+    bp = _minus(p, b)
+    d3 = _dot(ab, bp)
+    d4 = _dot(ac, bp)
+    if d3 >= 0.0 and d4 <= d3:
+        return b
+    vc = d1 * d4 - d3 * d2
+    if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0 and d1 != d3:
+        return _along(a, ab, d1 / (d1 - d3))
+    cp = _minus(p, c)
+    d5 = _dot(ab, cp)
+    d6 = _dot(ac, cp)
+    if d6 >= 0.0 and d5 <= d6:
+        return c
+    vb = d5 * d2 - d1 * d6
+    if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0 and d2 != d6:
+        return _along(a, ac, d2 / (d2 - d6))
+    va = d3 * d6 - d5 * d4
+    if va <= 0.0 and d4 - d3 >= 0.0 and d5 - d6 >= 0.0 and \
+            (d4 - d3) + (d5 - d6) != 0.0:
+        return _along(b, _minus(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6)))
+    total = va + vb + vc
+    if total == 0.0:
+        return a                            # a degenerate triangle
+    v = vb / total
+    w = vc / total
+    return (a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w,
+            a[2] + ab[2] * v + ac[2] * w)
+
+
+def closest_on_segments(p1, q1, p2, q2):
+    """The nearest points of segments p1-q1 and p2-q2 (Ericson 5.1.9)."""
+    d1 = _minus(q1, p1)
+    d2 = _minus(q2, p2)
+    r = _minus(p1, p2)
+    a = _dot(d1, d1)
+    e = _dot(d2, d2)
+    f = _dot(d2, r)
+    tiny = 1e-18
+    if a <= tiny and e <= tiny:
+        return p1, p2
+    if a <= tiny:
+        s = 0.0
+        t = _clamp(f / e)
+    else:
+        c = _dot(d1, r)
+        if e <= tiny:
+            t = 0.0
+            s = _clamp(-c / a)
+        else:
+            b = _dot(d1, d2)
+            denominator = a * e - b * b
+            s = _clamp((b * f - c * e) / denominator) \
+                if denominator > tiny else 0.0
+            t = (b * s + f) / e
+            if t < 0.0:
+                t = 0.0
+                s = _clamp(-c / a)
+            elif t > 1.0:
+                t = 1.0
+                s = _clamp((b - c) / a)
+    return _along(p1, d1, s), _along(p2, d2, t)
+
+
+def _squared(a, b):
+    dx = a[0] - b[0]
+    dy = a[1] - b[1]
+    dz = a[2] - b[2]
+    return dx * dx + dy * dy + dz * dz
+
+
+def triangle_distance(first, second):
+    """(squared distance, point on first, point on second) between two
+    triangles, each three points. Zero where they cross."""
+    a0, a1, a2 = first
+    b0, b1, b2 = second
+    edges_a = ((a0, a1), (a1, a2), (a2, a0))
+    edges_b = ((b0, b1), (b1, b2), (b2, b0))
+    for p, q in edges_a:
+        hit = pierce(p, q, b0, b1, b2)
+        if hit is not None:
+            return 0.0, hit, hit
+    for p, q in edges_b:
+        hit = pierce(p, q, a0, a1, a2)
+        if hit is not None:
+            return 0.0, hit, hit
+    best = None
+    for p in first:
+        q = closest_on_triangle(p, b0, b1, b2)
+        d = _squared(p, q)
+        if best is None or d < best[0]:
+            best = (d, p, q)
+    for q in second:
+        p = closest_on_triangle(q, a0, a1, a2)
+        d = _squared(p, q)
+        if d < best[0]:
+            best = (d, p, q)
+    for p1, q1 in edges_a:
+        for p2, q2 in edges_b:
+            c1, c2 = closest_on_segments(p1, q1, p2, q2)
+            d = _squared(c1, c2)
+            if d < best[0]:
+                best = (d, c1, c2)
+    return best
+
+
+def mesh_distance(pos_a, idx_a, box_a, pos_b, idx_b, box_b, limit,
+                  max_tests=400000):
+    """The gap between two triangle surfaces, when it is under `limit`.
+
+    Returns None when the surfaces are `limit` or more apart, otherwise
+    a dict: distance, the nearest point on each, and complete (False
+    when it stopped at `max_tests` triangle pairs, in which case the
+    distance is the smallest found so far, so may be too large)."""
+    if not len(idx_a) or not len(idx_b) or limit <= 0:
+        return None
+    if not boxes_overlap(pad(box_a, limit), box_b, 0.0):
+        return None
+    tris_a = _triangles(pos_a, idx_a, pad(box_b, limit))
+    tris_b = _triangles(pos_b, idx_b, pad(box_a, limit))
+    best = limit * limit
+    found = None
+    tests = 0
+    start = 0
+    count_b = len(tris_b)
+    complete = True
+    for ta in tris_a:
+        reach = best ** 0.5
+        # ta's x0 only grows and reach only shrinks, so a triangle of b
+        # that ends before ta starts, by more than reach, is done with.
+        while start < count_b and tris_b[start][1] < ta[0] - reach:
+            start += 1
+        for n in range(start, count_b):
+            tb = tris_b[n]
+            if tb[0] > ta[1] + reach:
+                break
+            gap_x = max(0.0, tb[0] - ta[1], ta[0] - tb[1])
+            gap_y = max(0.0, tb[2] - ta[3], ta[2] - tb[3])
+            gap_z = max(0.0, tb[4] - ta[5], ta[4] - tb[5])
+            if gap_x * gap_x + gap_y * gap_y + gap_z * gap_z >= best:
+                continue
+            tests += 1
+            squared, p, q = triangle_distance(ta[6:9], tb[6:9])
+            if squared < best:
+                best = squared
+                reach = best ** 0.5
+                found = (p, q)
+                if best == 0.0:
+                    return {"distance": 0.0, "a": p, "b": q,
+                            "complete": True}
+            if tests >= max_tests:
+                complete = False
+                break
+        if not complete:
+            break
+    if found is None:
+        return None
+    return {"distance": best ** 0.5, "a": found[0], "b": found[1],
+            "complete": complete}
+
+
+# --------------------------------------------------------------------------
 # JSON for the page
 #
 # IronPython's json.dumps cannot be used here. Its encoder decides a

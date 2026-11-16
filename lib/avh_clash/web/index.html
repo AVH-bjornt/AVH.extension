@@ -62,6 +62,15 @@
             <button class="preset quiet" data-preset="clear">Clear both</button>
           </div>
         </details>
+        <details class="fold" id="clearance-fold">
+          <summary>Clearance zone <span id="clearance-summary" class="fold-count"></span></summary>
+          <label class="clear-line"><input type="checkbox" id="clearance-on" checked>
+            <span>Soft clash within</span>
+            <span class="mm-input"><input id="clearance-mm" type="number" min="1" max="1000" step="5" value="50" inputmode="numeric" aria-label="Clearance in millimetres"><span>mm</span></span>
+            <span>of:</span></label>
+          <div id="clearance-cats" class="clear-cats"></div>
+          <p class="hint">Anything that comes this close to one of these, without touching it, is a soft clash, shown in <span class="soft-word">violet</span>. A pipe and its own fittings and insulation never count.</p>
+        </details>
         <details class="fold">
           <summary>Options</summary>
           <fieldset class="block">
@@ -103,11 +112,12 @@
               <option value="level">Level</option>
               <option value="a">Element in A</option>
               <option value="b">Element in B</option>
+              <option value="kind">Hard or soft</option>
               <option value="none">Nothing</option>
             </select></label>
           <label class="field">Sort by
             <select id="sort">
-              <option value="depth">Deepest first</option>
+              <option value="depth">Worst first</option>
               <option value="volume">Largest volume first</option>
               <option value="number">Order found</option>
             </select></label>
@@ -115,6 +125,11 @@
         <label class="field slider">Ignore clashes shallower than
           <output id="tolerance-value">0 mm</output>
           <input id="tolerance" type="range" min="0" max="100" step="1" value="0"></label>
+        <div class="kinds" role="group" aria-label="Which clashes">
+          <button data-kind="all" aria-pressed="true">All <span data-count="all"></span></button>
+          <button data-kind="hard" aria-pressed="false"><span class="swatch dot"></span>Hard <span data-count="hard"></span></button>
+          <button data-kind="soft" aria-pressed="false"><span class="swatch dot soft"></span>Soft <span data-count="soft"></span></button>
+        </div>
         <label class="check"><input type="checkbox" id="hide-reviewed"> Hide reviewed</label>
       </div>
       <div id="list" class="list" tabindex="0"></div>
@@ -133,6 +148,7 @@
       <button data-layer="a" aria-pressed="true"><span class="swatch a"></span>Set A</button>
       <button data-layer="b" aria-pressed="true"><span class="swatch b"></span>Set B</button>
       <button data-layer="volume" aria-pressed="true"><span class="swatch clash"></span>Overlap</button>
+      <button data-layer="zone" aria-pressed="true"><span class="swatch soft"></span>Clearance zone</button>
       <button data-layer="markers" aria-pressed="true"><span class="swatch dot"></span>Markers</button>
       <button data-layer="xray" aria-pressed="true" title="See through the two clashing elements">X-ray</button>
       <button id="context-mode" title="How everything else is drawn">Surroundings: faint</button>
@@ -145,8 +161,8 @@
         <button id="card-close" class="icon" title="Deselect (Esc)" aria-label="Deselect">&#x2715;</button>
       </div>
       <dl class="measures">
-        <div><dt>Depth</dt><dd id="card-depth"></dd></div>
-        <div><dt>Volume</dt><dd id="card-volume"></dd></div>
+        <div><dt id="card-depth-label">Depth</dt><dd id="card-depth"></dd></div>
+        <div><dt id="card-volume-label">Volume</dt><dd id="card-volume"></dd></div>
         <div><dt>Level</dt><dd id="card-level"></dd></div>
       </dl>
       <div class="element a"><span class="swatch a"></span>

@@ -271,6 +271,132 @@ check("batch: base64 is text, for JSON",
 
 
 # --------------------------------------------------------------------------
+# Distance between surfaces, for clearance zones
+#
+# A soft clash is decided entirely by this number, so every case has an
+# answer worked out by hand, and the mesh search is checked against a
+# brute force over every pair of triangles.
+# --------------------------------------------------------------------------
+
+def near(p, q, tolerance=1e-9):
+    return all(abs(x - y) < tolerance for x, y in zip(p, q))
+
+
+flat = ((0, 0, 0), (4, 0, 0), (0, 4, 0))
+check("nearest: above the inside lands straight below",
+      near(model.closest_on_triangle((1, 1, 3), *flat), (1, 1, 0)))
+check("nearest: beyond a corner is that corner",
+      near(model.closest_on_triangle((-2, -3, 1), *flat), (0, 0, 0)))
+check("nearest: beyond an edge lands on that edge",
+      near(model.closest_on_triangle((2, -5, 0), *flat), (2, 0, 0)))
+check("nearest: beyond the long edge lands on it",
+      near(model.closest_on_triangle((4, 4, 0), *flat), (2, 2, 0)))
+check("nearest: a degenerate triangle does not divide by zero",
+      model.closest_on_triangle((1, 1, 1), (0, 0, 0), (0, 0, 0),
+                                (0, 0, 0)) == (0, 0, 0))
+
+c1, c2 = model.closest_on_segments((0, 0, 0), (2, 0, 0), (1, -1, 1), (1, 1, 1))
+check("segments: crossing at a distance meet in the middle",
+      near(c1, (1, 0, 0)) and near(c2, (1, 0, 1)), repr((c1, c2)))
+c1, c2 = model.closest_on_segments((0, 0, 0), (2, 0, 0), (0, 1, 0), (2, 1, 0))
+check("segments: parallel ones are one apart",
+      close(model._squared(c1, c2), 1.0), repr((c1, c2)))
+c1, c2 = model.closest_on_segments((0, 0, 0), (1, 0, 0), (3, 0, 0), (5, 0, 0))
+check("segments: in line, end to end",
+      near(c1, (1, 0, 0)) and near(c2, (3, 0, 0)))
+c1, c2 = model.closest_on_segments((0, 0, 0), (0, 0, 0), (1, -1, 0), (1, 1, 0))
+check("segments: a point against a segment",
+      near(c1, (0, 0, 0)) and near(c2, (1, 0, 0)))
+
+above = ((0, 0, 0.5), (4, 0, 0.5), (0, 4, 0.5))
+d, p, q = model.triangle_distance(flat, above)
+check("triangles: one 0.5 above the other", close(d, 0.25), repr(d))
+crossing = ((1, 1, -1), (1, 1, 1), (2, 1, 0))
+check("triangles: crossing ones are zero apart",
+      model.triangle_distance(flat, crossing)[0] == 0.0)
+skew = ((5, 0, 1), (5, 4, 1), (8, 0, 1))
+d, p, q = model.triangle_distance(flat, skew)
+check("triangles: edge to edge, across a gap",
+      close(d, 1.0 + 1.0), repr((d, p, q)))
+
+# Two boxes with a 30 mm gap between their faces, measured in metres.
+wall_m = box_mesh(0, 0, 0, 5, 0.2, 3)
+pipe_near = box_mesh(1, 0.23, 1, 4, 0.33, 1.1)
+gap = model.mesh_distance(wall_m[0], wall_m[1], wall_m[2],
+                          pipe_near[0], pipe_near[1], pipe_near[2], 0.05)
+check("gap: 30 mm between faces is found",
+      gap is not None and close(gap["distance"], 0.03, 1e-6), repr(gap))
+check("gap: the nearest points are on the two faces",
+      gap is not None and close(gap["a"][1], 0.2, 1e-6) and
+      close(gap["b"][1], 0.23, 1e-6), repr(gap))
+check("gap: wider than the limit is no soft clash",
+      model.mesh_distance(wall_m[0], wall_m[1], wall_m[2],
+                          pipe_near[0], pipe_near[1], pipe_near[2],
+                          0.02) is None)
+check("gap: exactly the limit is not inside it",
+      model.mesh_distance(wall_m[0], wall_m[1], wall_m[2],
+                          pipe_near[0], pipe_near[1], pipe_near[2],
+                          0.03) is None)
+check("gap: the same either way round",
+      close(model.mesh_distance(pipe_near[0], pipe_near[1], pipe_near[2],
+                                wall_m[0], wall_m[1], wall_m[2],
+                                0.05)["distance"], 0.03, 1e-6))
+resting = box_mesh(1, 0.2, 1, 4, 0.3, 1.1)
+check("gap: touching is zero",
+      close(model.mesh_distance(wall_m[0], wall_m[1], wall_m[2],
+                                resting[0], resting[1], resting[2],
+                                0.05)["distance"], 0.0, 1e-9))
+corner = box_mesh(5.02, 0.21, 3.02, 6, 1, 4)    # off the far top corner
+corner_gap = model.mesh_distance(wall_m[0], wall_m[1], wall_m[2],
+                                 corner[0], corner[1], corner[2], 0.05)
+check("gap: corner to corner is the diagonal",
+      corner_gap is not None and
+      close(corner_gap["distance"], (0.02 ** 2 + 0.01 ** 2 + 0.02 ** 2) ** 0.5,
+            1e-6), repr(corner_gap))
+check("gap: an empty mesh has no gap",
+      model.mesh_distance(model.new_floats(), model.new_indices(), wall_m[2],
+                          pipe_near[0], pipe_near[1], pipe_near[2],
+                          0.05) is None)
+
+
+def brute_gap(a, b):
+    best = None
+    tris = lambda mesh: [tuple((mesh[0][i * 3], mesh[0][i * 3 + 1],
+                                mesh[0][i * 3 + 2])
+                               for i in mesh[1][n:n + 3])
+                         for n in range(0, len(mesh[1]), 3)]
+    for ta in tris(a):
+        for tb in tris(b):
+            d = model.triangle_distance(ta, tb)[0]
+            if best is None or d < best:
+                best = d
+    return best ** 0.5
+
+
+rng = random.Random(11)
+agree = 0
+for trial in range(40):
+    x, y, z = rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1)
+    first = box_mesh(0, 0, 0, rng.uniform(0.2, 1), rng.uniform(0.2, 1),
+                     rng.uniform(0.2, 1))
+    second = box_mesh(x + 1.05, y, z, x + 1.05 + rng.uniform(0.1, 0.8),
+                      y + rng.uniform(0.1, 0.8), z + rng.uniform(0.1, 0.8))
+    expected = brute_gap(first, second)
+    got = model.mesh_distance(first[0], first[1], first[2],
+                              second[0], second[1], second[2], 10.0)
+    if got is not None and close(got["distance"], expected, 1e-7):
+        agree += 1
+check("gap: the search agrees with brute force on 40 random pairs",
+      agree == 40, "{0} of 40".format(agree))
+
+cut = model.mesh_distance(wall_m[0], wall_m[1], wall_m[2],
+                          pipe_near[0], pipe_near[1], pipe_near[2], 0.05,
+                          max_tests=1)
+check("gap: a search cut short says so",
+      cut is None or cut["complete"] is False, repr(cut))
+
+
+# --------------------------------------------------------------------------
 # JSON for the page
 #
 # 2.44.1 used json.dumps, which on IronPython raises on any non-ASCII

@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.45.0.** The authoritative number is `__version__` in
+**Version 2.46.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -264,6 +264,18 @@ its section box) and the geometry detail. **Tolerance** beside Run leaves
 out clashes shallower than that, and can be changed afterwards in the
 list. **Refresh from Revit** reads the links and the selection again.
 
+**Clearance zone** marks **soft clashes**: anything that comes within a
+set distance of a pipe without touching it, shown in violet. Set the
+distance (50 mm to start) and which categories carry a zone: pipes,
+pipe fittings, accessories, flex pipes and pipe insulation by default,
+and any other MEP category in the two models can be added. The gap is
+measured between the two surfaces, so a soft clash says how close, and
+the viewer draws the zone round the pipe and the gap as a line between
+the nearest points. A pipe is never a clash, hard or soft, with the
+fittings it is connected to or with its own insulation. The list can show
+all clashes, only hard or only soft, and Worst first puts every hard
+clash above the soft ones.
+
 Revit intersects the two solids of every pair close enough to matter,
 so a clash comes with its volume and depth, and the shared volume is
 drawn in red. Geometry that is not solid, as in many IFC links, is
@@ -507,7 +519,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.44.1 | Clash Detector: quick setups, Refresh from Revit, Run off until the models are listed, errors shown and logged, an empty set says why | Named the cause: IronPython's `json.dumps` raised on an "ö" in a category name |
 | 2.44.2 | Clash Detector: messages to the viewer written by AVH's own JSON encoder, plain ASCII whatever the names hold | Never reached Revit: the persistent engine kept running the 2.44.0 window module |
 | 2.44.3 | Clash Detector: each new window reloads its modules from disk | Not yet run in Revit |
-| 2.45.0 | Clash Detector setup: model A and model B, one category list with A and B buttons under discipline headings, presets, tolerance beside Run | Not yet run in Revit, current |
+| 2.45.0 | Clash Detector setup: model A and model B, one category list with A and B buttons under discipline headings, presets, tolerance beside Run | Not yet run in Revit |
+| 2.46.0 | Clash Detector: clearance zones round pipes, soft clashes in violet; a pipe never clashes with its own fittings or insulation | Not yet run in Revit, current |
 
 ## Licence
 

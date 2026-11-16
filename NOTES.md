@@ -1997,6 +1997,49 @@ table is listed under Other rather than dropped. The grouping is a
 judgement (railings under Interior, slab edges under Structure, as in
 the mock-up), so move entries freely.
 
+**Clearance zones are measured, not modelled (2.46.0).** A soft clash
+is two elements that do not intersect but whose surfaces are closer
+than the clearance of one of them. The gap is measured between the same
+triangles the viewer draws (`model.mesh_distance`: point to triangle and
+edge to edge, Ericson's closest-point routines, with a sweep along x
+that drops triangle pairs whose boxes are already further apart than
+the best gap so far). Building an inflated solid in Revit was the other
+road; it would need a different construction per kind of geometry
+(a swept circle for a pipe, nothing general for a fitting) and could not
+say how close. A distance works for any two meshes and gives the two
+nearest points, which the viewer draws as the gap.
+
+The zone grows each zoned element's box by the clearance before the
+broad phase, so a near miss becomes a candidate pair. Each pair then
+gets the hard test if the real boxes overlap, and the gap test only if
+that found nothing, so a pipe through a wall is one hard clash, not a
+hard and a soft.
+
+Tessellation draws a round pipe as facets inside the true surface, so a
+gap to a pipe reads up to r(1 - cos(pi / n)) wide: under 1 mm for DN100
+at medium detail. Choose Fine detail when a zone is tight.
+
+**Built together is never a clash.** Without this every pipe joint is
+a soft clash: a pipe and its fitting meet face to face, and insulation
+wraps its pipe. `reader.joined_ids` collects what an element's MEP
+connectors are connected to and an insulation or lining's host, and the
+pair is skipped, hard or soft, and counted in `stats.joined`. Only
+within one model; a link's pipe is never connected to the host's. The
+connector calls (`ConnectorManager`, `AllRefs`, `Owner`,
+`HostElementId`) are read from the API docs and unverified in Revit.
+
+The zone is drawn by pushing the element's surface out along the
+average of the face normals at each corner, scaled so every face moves
+the full clearance. Square corners stay square, pipes stay round; it is
+a picture of the zone, not what the gap is measured against.
+
+Mutations: zoned boxes not grown for pairing (crash: the near miss is
+never paired), built-together pairs not skipped (4), the zone only
+counted on side B (1), the insulation host ignored (3), a sweep that
+drops triangles still in reach (1). Counting a gap exactly equal to the
+clearance survives, because the box test before it already excludes
+that case.
+
 **WebView2 comes from Revit.** 2024 to 2027 all ship
 `Microsoft.Web.WebView2.{Core,Wpf}.dll` in the install folder, so
 nothing is bundled but three.js. The page is served through a virtual
@@ -2015,7 +2058,7 @@ behind it, `app.js` loads `demo.js`, which answers the same messages
 with a three storey box of walls, pipes and ducts. That is how the page
 was checked at 2.44.0, in light and dark.
 
-test_clash_model.py covers the arithmetic and the JSON (90 checks); the harness (114)
+test_clash_model.py covers the arithmetic, the gap and the JSON (112 checks); the harness (137)
 runs the real script and service against a fake Revit made of boxes,
 where a boolean is the box two boxes share and a link sits somewhere
 else. Mutations caught: commit status ignored (1), link solids not

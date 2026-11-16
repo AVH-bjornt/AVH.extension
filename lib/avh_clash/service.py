@@ -50,6 +50,37 @@ def _collection(DB, items, kind):
         return list(items)
 
 
+def clearance_of(config):
+    """(metres, set of category ids) from the run's `clearance`, or
+    (0.0, empty) when there is none."""
+    clearance = config.get(u"clearance") or {}
+    try:
+        metres = float(clearance.get(u"mm") or 0) / 1000.0
+    except (TypeError, ValueError):
+        metres = 0.0
+    cats = set()
+    for cat in clearance.get(u"cats") or []:
+        try:
+            cats.add(int(cat))
+        except (TypeError, ValueError):
+            pass
+    if metres <= 0 or not cats:
+        return 0.0, set()
+    return metres, cats
+
+
+def soft_clash(gap, clearance):
+    """A gap under the clearance, as a clash: where and how close."""
+    p = gap["a"]
+    q = gap["b"]
+    middle = ((p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5, (p[2] + q[2]) * 0.5)
+    box = model.pad(model.bounds(list(p) + list(q)), 0.001)
+    return {"kind": u"soft", "volume": None, "depth": None,
+            "center": middle, "box": box, "exact": True,
+            "partial": not gap["complete"], "gap": gap["distance"],
+            "clear": clearance, "p": p, "q": q}
+
+
 class Service(object):
 
     def __init__(self, DB, uiapp, version=u"", logger=None):
@@ -176,6 +207,7 @@ class Service(object):
         excluded = rd.excluded_ids(DB)
         self.excluded = excluded
         groups, group_order = rd.discipline_ids(DB)
+        clear_ids = rd.enum_ids(DB, rd.CLEARANCE_DEFAULT)
 
         sources = [rd.Source(u"host", to_text(doc.Title), u"host", doc)]
         sources.extend(rd.link_sources(DB, doc))
@@ -224,7 +256,8 @@ class Service(object):
                  "kind": source.kind,
                  "cats": sorted(
                      [{"id": cat_id, "name": name, "count": count,
-                       "group": groups.get(cat_id, rd.OTHER)}
+                       "group": groups.get(cat_id, rd.OTHER),
+                       "clear": cat_id in clear_ids}
                       for cat_id, (name, count) in counts.items()],
                      key=lambda cat: cat["name"].lower())}
                 for source, counts in listed],
@@ -318,6 +351,7 @@ class Service(object):
                         item = rd.Item(key, source, element,
                                        to_text(category.Name), box)
                         item.element_id = element_id
+                        item.cat_id = rd.id_value(category.Id)
                         items[key] = item
                         order.append(item)
                     item.sets |= bit
@@ -393,7 +427,8 @@ class Service(object):
         set_b = [item for item in items if item.sets & 2]
         stats = {"a": len(set_a), "b": len(set_b), "pairs": 0, "tested": 0,
                  "clipped": clipped, "failed": 0, "unreadable": 0,
-                 "cancelled": False, "contextCut": 0, "seconds": 0.0}
+                 "cancelled": False, "contextCut": 0, "seconds": 0.0,
+                 "hard": 0, "soft": 0, "joined": 0, "clearance": 0.0}
 
         if self._cancel:
             # Stopped while still collecting: there is nothing to show,
@@ -418,10 +453,22 @@ class Service(object):
             item.box = model.to_local(item.box_feet, origin)
         by_key = dict((item.key, item) for item in items)
 
+        # A clearance zone grows the box of each element that carries
+        # one, so an element near it, not touching, still makes a pair.
+        clearance, clear_cats = clearance_of(config)
+        stats["clearance"] = clearance
+        for item in items:
+            if clearance > 0 and item.cat_id in clear_cats:
+                item.clear = clearance
+
+        def reach(item):
+            return model.pad(item.box, item.clear) if item.clear \
+                else item.box
+
         self.progress(u"Finding candidate pairs", force=True)
         pairs = model.candidate_pairs(
-            [(item.key, item.box) for item in set_a],
-            [(item.key, item.box) for item in set_b])
+            [(item.key, reach(item)) for item in set_a],
+            [(item.key, reach(item)) for item in set_b])
         stats["pairs"] = len(pairs)
 
         reading = rd.Reader(DB, origin, detail)
@@ -435,21 +482,38 @@ class Service(object):
             self.progress(u"Testing pairs", number, len(pairs))
             a = by_key[key_a]
             b = by_key[key_b]
-            found = reading.test(a, b)
             stats["tested"] += 1
-            if found is None:
+            if reading.related(a, b):
+                stats["joined"] += 1            # a pipe and its fitting
                 continue
+            found = None
+            if model.boxes_overlap(a.box, b.box):
+                found = reading.test(a, b)
+            if found is None:
+                limit = max(a.clear, b.clear)
+                gap = reading.gap(a, b, limit) if limit > 0 else None
+                if gap is None:
+                    continue
+                found = soft_clash(gap, limit)
+                stats["soft"] += 1
+            else:
+                stats["hard"] += 1
             index = len(clashes)
-            clashes.append({
-                "n": index, "a": a.key, "b": b.key,
+            clash = {
+                "n": index, "a": a.key, "b": b.key, "kind": found["kind"],
                 "vol": found["volume"], "depth": found["depth"],
                 "c": list(found["center"]), "box": list(found["box"]),
-                "exact": found["exact"], "partial": found["partial"]})
+                "exact": found["exact"], "partial": found["partial"]}
+            if found["kind"] == u"soft":
+                clash.update({"gap": found["gap"], "clear": found["clear"],
+                              "p": list(found["p"]), "q": list(found["q"]),
+                              "zone": {"a": a.clear, "b": b.clear}})
+            clashes.append(clash)
             records.append({
                 "a": (a.source.key, a.element_id),
                 "b": (b.source.key, b.element_id),
                 "box_feet": model.to_feet(found["box"], origin)})
-            if found["pos"] is not None:
+            if found.get("pos") is not None:      # a soft clash has none
                 volumes.append((index, found["pos"], found["idx"]))
             a.clashing = True
             b.clashing = True

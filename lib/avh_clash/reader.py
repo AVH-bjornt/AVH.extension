@@ -94,6 +94,66 @@ DISCIPLINES = (
 )
 OTHER = u"Other"
 
+# The categories that carry a clearance zone unless the page says
+# otherwise: pipes and what is fitted to them.
+CLEARANCE_DEFAULT = (
+    "OST_PipeCurves", "OST_PipeFitting", "OST_PipeAccessory",
+    "OST_FlexPipeCurves", "OST_PipeInsulations")
+
+
+def enum_ids(DB, names):
+    """The category ids of `names` this Revit version has."""
+    found = set()
+    for name in names:
+        member = getattr(DB.BuiltInCategory, name, None)
+        if member is None:
+            continue
+        try:
+            found.add(int(member))
+        except BaseException:
+            pass
+    return found
+
+
+def joined_ids(element):
+    """Ids of the elements this one is built together with, which are
+    never a clash with it, hard or soft: whatever its MEP connectors are
+    connected to (a pipe and its fittings), and the host of insulation or
+    lining. Without this every pipe joint is a soft clash.
+
+    Unverified until run in Revit: ConnectorManager.Connectors,
+    Connector.AllRefs and .Owner, InsulationLiningBase.HostElementId."""
+    found = set()
+    manager = getattr(element, "ConnectorManager", None)
+    if manager is None:
+        mep = getattr(element, "MEPModel", None)
+        manager = getattr(mep, "ConnectorManager", None) \
+            if mep is not None else None
+    if manager is not None:
+        try:
+            connectors = list(manager.Connectors)
+        except BaseException:
+            connectors = []
+        for connector in connectors:
+            try:
+                for other in connector.AllRefs:
+                    owner = getattr(other, "Owner", None)
+                    if owner is not None:
+                        found.add(id_value(owner.Id))
+            except BaseException:
+                continue
+    host = getattr(element, "HostElementId", None)
+    if host is not None:
+        try:
+            found.add(id_value(host))
+        except BaseException:
+            pass
+    try:
+        found.discard(id_value(element.Id))
+    except BaseException:
+        pass
+    return found
+
 
 def discipline_ids(DB):
     """{category id: discipline heading} for the categories this Revit
@@ -180,6 +240,9 @@ class Item(object):
         self.box_feet = box_feet
         self.box = None                     # metres from the origin
         self.sets = 0                       # 1 = A, 2 = B, 3 = both
+        self.cat_id = None
+        self.clear = 0.0                    # clearance zone, metres
+        self.joined = None                  # joined_ids, read when needed
         self.geometry = None
         self.sent = False
 
@@ -439,6 +502,32 @@ class Reader(object):
             idx.append(base + int(triangle.get_Index(1)))
             idx.append(base + int(triangle.get_Index(2)))
 
+    # -- clearance -----------------------------------------------------
+
+    def related(self, a, b):
+        """True when a and b are built together (see joined_ids), which
+        can only be within one model."""
+        if a.source.prefix != b.source.prefix:
+            return False
+        for item in (a, b):
+            if item.joined is None:
+                try:
+                    item.joined = joined_ids(item.element)
+                except BaseException:
+                    item.joined = set()
+        return b.element_id in a.joined or a.element_id in b.joined
+
+    def gap(self, a, b, limit):
+        """How far apart the surfaces of a and b are, when under `limit`
+        metres: model.mesh_distance's answer, or None."""
+        ga = self.geometry(a)
+        gb = self.geometry(b)
+        if not len(ga.idx) or not len(gb.idx) or ga.box is None or \
+                gb.box is None:
+            return None
+        return model.mesh_distance(ga.pos, ga.idx, ga.box,
+                                   gb.pos, gb.idx, gb.box, limit)
+
     # -- the test ------------------------------------------------------
 
     def test(self, a, b):
@@ -489,7 +578,7 @@ class Reader(object):
                 box = model.intersection(ga.box, gb.box)
             if box is None:
                 return None
-            return {"exact": True,
+            return {"kind": u"hard", "exact": True,
                     "volume": volume * model.CUBIC_FEET_TO_M3,
                     "depth": min(model.extents(box)),
                     "box": box, "center": model.center(box),
@@ -502,7 +591,8 @@ class Reader(object):
                                  gb.pos, gb.idx, gb.box)
         if found is None:
             return None
-        return {"exact": False, "volume": None, "depth": None,
+        return {"kind": u"hard", "exact": False, "volume": None,
+                "depth": None,
                 "box": found["box"], "center": found["center"],
                 "pos": None, "idx": None,
                 "partial": not found["complete"]}

@@ -432,7 +432,9 @@ DB = Namespace(
     BooleanOperationsType=Namespace(Intersect="Intersect"),
     SolidUtils=SolidUtils, CategoryType=Namespace(Model="Model"),
     BuiltInCategory=Namespace(OST_Rooms=-2000160, OST_Walls=-2000011,
-                              OST_Floors=-2000032, OST_PipeCurves=-2008044),
+                              OST_Floors=-2000032, OST_PipeCurves=-2008044,
+                              OST_PipeFitting=-2008049,
+                              OST_PipeInsulations=-2008122),
     FilteredElementCollector=FilteredElementCollector,
     RevitLinkInstance=RevitLinkInstance, Level=Level, View3D=View3D,
     Transaction=Transaction,
@@ -683,7 +685,10 @@ check("init: rooms, annotation and view specific elements are left out",
 check("init: the link's pipes are counted, under their discipline",
       init["sources"][1]["cats"] == [
           {"id": -2008044, "name": u"Pipes", "count": 3,
-           "group": u"MEP - Plumbing"}], repr(init["sources"][1]["cats"]))
+           "group": u"MEP - Plumbing", "clear": True}],
+      repr(init["sources"][1]["cats"]))
+check("init: walls and floors carry no clearance zone by default",
+      not any(c["clear"] for c in init["sources"][0]["cats"]))
 host_groups = dict((c["name"], c["group"]) for c in init["sources"][0]["cats"])
 check("init: disciplines come from the category, not its name",
       host_groups == {u"Veggir": u"Architecture",
@@ -1280,6 +1285,149 @@ page.send({u"type": u"run", u"config": {
 why = page.result()["why"]
 check("why: nothing sent for a set is not mistaken for an empty model",
       why["a"]["entries"] == 0 and why["a"]["looked"] == 0, repr(why))
+
+
+# --------------------------------------------------------------------------
+# 12. Clearance zones: soft clashes
+#
+# Added at 2.46.0. A pipe that comes within the clearance of something,
+# without touching it, is a soft clash. In the fake, distances are
+# exact: every element is a box, and the gap between two boxes is known.
+# --------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+FITTINGS = Category(-2008049, u"Pipe Fittings")
+INSULATION = Category(-2008122, u"Pipe Insulations")
+
+
+def clearance_site():
+    """A wall in the host; in a link, one pipe 30 mm off the wall's face,
+    one 80 mm off, and one through it."""
+    wall = Element(WALLS, (0, 0, 0, 5 * M, 0.2 * M, 3 * M), u"Veggur")
+    near_pipe = Element(PIPES, (1 * M, 0.23 * M, 1 * M,
+                                4 * M, 0.33 * M, 1.1 * M), u"DN100 near")
+    far_pipe = Element(PIPES, (1 * M, 0.28 * M, 2 * M,
+                               4 * M, 0.38 * M, 2.1 * M), u"DN100 far")
+    through = Element(PIPES, (4.5 * M, -1 * M, 0.5 * M,
+                              4.6 * M, 1 * M, 0.6 * M), u"DN100 through")
+    link_doc = Document(u"Lagnir.rvt", [near_pipe, far_pipe, through])
+    instance = RevitLinkInstance(link_doc, Transform())
+    host = Document(u"Hús.rvt", [wall, instance], view=View3D(u"{3D}"))
+    return Namespace(host=host, wall=wall, near=near_pipe, far=far_pipe,
+                     through=through, instance=instance)
+
+
+def with_clearance(init, mm, cats=(-2008044,), **more):
+    message = run_config(init, **more)
+    message[u"config"][u"clearance"] = {u"mm": mm, u"cats": list(cats)}
+    return message
+
+
+reset()
+site = clearance_site()
+page = Page(new_service(World(site.host)))
+init = page.send({u"type": u"ready"})[0]
+messages = page.send(with_clearance(init, 50))
+result = page.result()
+link = u"link:{0}".format(site.instance.Id.Value)
+by_b = dict((c["b"].split(u":")[-1], c) for c in result["clashes"])
+near_c = by_b.get(u"{0}".format(site.near.Id.Value))
+through_c = by_b.get(u"{0}".format(site.through.Id.Value))
+
+check("soft: a pipe 30 mm from the wall, with 50 mm clearance, is soft",
+      near_c is not None and near_c["kind"] == u"soft", repr(result["clashes"]))
+check("soft: and the gap is measured, 30 mm",
+      near_c is not None and close(near_c["gap"], 0.03, 1e-5),
+      repr(near_c))
+check("soft: with the clearance it broke, and which side carries the zone",
+      near_c is not None and close(near_c["clear"], 0.05) and
+      near_c["zone"] == {"a": 0.0, "b": 0.05}, repr(near_c))
+check("soft: the nearest points are the gap apart",
+      near_c is not None and
+      close(model._squared(near_c["p"], near_c["q"]) ** 0.5, 0.03, 1e-5))
+check("soft: a soft clash has no volume or depth",
+      near_c is not None and near_c["vol"] is None and
+      near_c["depth"] is None)
+check("soft: a pipe 80 mm away is clear of a 50 mm zone",
+      u"{0}".format(site.far.Id.Value) not in by_b)
+check("soft: a pipe through the wall stays hard, and is listed once",
+      through_c is not None and through_c["kind"] == u"hard" and
+      len(result["clashes"]) == 2, repr(result["clashes"]))
+check("soft: the run counts each kind",
+      result["stats"]["hard"] == 1 and result["stats"]["soft"] == 1 and
+      close(result["stats"]["clearance"], 0.05), repr(result["stats"]))
+check("soft: no overlap mesh is sent for a soft clash",
+      not any(k == ("c", near_c["n"]) for k in decode_meshes(messages)))
+check("soft: both elements are drawn",
+      ("e", u"host:{0}".format(site.wall.Id.Value)) in
+      decode_meshes(messages) and
+      ("e", u"{0}:{1}".format(link, site.near.Id.Value)) in
+      decode_meshes(messages))
+check("soft: the result encodes for the page",
+      json.loads(model.to_json(result)) == json.loads(json.dumps(result)))
+
+page.send(with_clearance(init, 20))
+check("soft: 20 mm clearance lets the 30 mm gap pass",
+      all(c["kind"] == u"hard" for c in page.result()["clashes"]) and
+      page.result()["stats"]["soft"] == 0)
+page.send(run_config(init))
+check("soft: with no clearance zone there are no soft clashes",
+      page.result()["stats"]["soft"] == 0 and
+      len(page.result()["clashes"]) == 1)
+page.send(with_clearance(init, 50, cats=(-2000011,)))
+walls_zone = [c for c in page.result()["clashes"] if c["kind"] == u"soft"]
+check("soft: a zone on walls instead finds the same gap from the wall's side",
+      len(walls_zone) == 1 and walls_zone[0]["zone"] == {"a": 0.05, "b": 0.0},
+      repr(walls_zone))
+page.send(with_clearance(init, 0))
+check("soft: a clearance of 0 mm is off",
+      page.result()["stats"]["soft"] == 0)
+
+page.send({u"type": u"select", u"index": near_c["n"], u"zoom": True})
+check("soft: select in Revit works for a soft clash",
+      page.of("error") == [] and page.of("notice")[0]["kind"] == u"ok")
+
+# Built together is never a clash: a pipe and its fitting, a pipe and
+# its insulation. Both pairs would otherwise be clashes, hard or soft.
+reset()
+pipe = Element(PIPES, (0, 0, 0, 3 * M, 0.1 * M, 0.1 * M), u"Pipe")
+fitting = Element(FITTINGS, (3 * M, -0.01 * M, -0.01 * M,
+                             3.2 * M, 0.11 * M, 0.11 * M), u"Elbow")
+insulation = Element(INSULATION, (-0.01 * M, -0.02 * M, -0.02 * M,
+                                  3 * M, 0.12 * M, 0.12 * M), u"Insulation")
+stranger = Element(PIPES, (0, 0.13 * M, 0, 3 * M, 0.23 * M, 0.1 * M),
+                   u"Other pipe")
+connector = Namespace(AllRefs=[Namespace(Owner=fitting)])
+pipe.ConnectorManager = Namespace(Connectors=[connector])
+insulation.HostElementId = pipe.Id
+host = Document(u"Lagnir.rvt", [pipe, fitting, insulation, stranger],
+                view=View3D(u"{3D}"))
+page = Page(new_service(World(host)))
+init = page.send({u"type": u"ready"})[0]
+page.send(with_clearance(init, 50, cats=(-2008044, -2008049, -2008122),
+                         a=("host",), b=("host",)))
+result = page.result()
+pairs = set(tuple(sorted((c["a"], c["b"]))) for c in result["clashes"])
+key = lambda element: u"host:{0}".format(element.Id.Value)
+check("joined: a pipe and the fitting it is connected to are not a clash",
+      tuple(sorted((key(pipe), key(fitting)))) not in pairs, repr(pairs))
+check("joined: a pipe and its own insulation are not a clash",
+      tuple(sorted((key(pipe), key(insulation)))) not in pairs, repr(pairs))
+check("joined: the skipped pairs are counted",
+      result["stats"]["joined"] == 2, repr(result["stats"]))
+check("joined: an unconnected pipe 30 mm away is still a soft clash",
+      tuple(sorted((key(pipe), key(stranger)))) in pairs, repr(pairs))
+check("joined: and it is the only clash with the pipe that is soft",
+      [c["kind"] for c in result["clashes"]
+       if key(pipe) in (c["a"], c["b"])] == [u"soft"])
+
+check("joined: elements in different models are never joined",
+      not reader.Reader(DB, (0, 0, 0)).related(
+          Namespace(source=Namespace(prefix=u"host"), element_id=1,
+                    joined=set([2])),
+          Namespace(source=Namespace(prefix=u"link:5"), element_id=2,
+                    joined=set())))
 
 
 # --------------------------------------------------------------------------
