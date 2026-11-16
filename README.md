@@ -8,7 +8,7 @@ No dependencies. Nothing to `pip install`, nothing bundled: the whole
 extension is the Python standard library plus the Revit API. It runs on
 pyRevit's IronPython engine.
 
-**Version 2.43.0.** The authoritative number is `__version__` in
+**Version 2.43.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -457,7 +457,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.41.0 | Revit 2025 has no Element Id schedule field: Stamp Element IDs button, stamped ids verified on export, rows matched by value as the fallback | Not yet run in Revit |
 | 2.42.0 | Tab regrouped: Coordination, Views, Model, Check and Data panels, with stacks and a Hide pulldown; Tools, Worksets, Schedules and Forma panels gone | Stamp stack skipped on a reload: the old button's name was still on the ribbon; a restart clears it |
 | 2.42.1 | Icons for Import Schedule and Stamp Element IDs | Not yet run in Revit |
-| 2.43.0 | Update panel: Update AVH pulls the newest version from GitHub and reloads pyRevit | Not yet run in Revit, current |
+| 2.43.0 | Update panel: Update AVH pulls the newest version from GitHub and reloads pyRevit | Not yet run in Revit |
+| 2.43.1 | Icon for Update AVH | Not yet run in Revit, current |
 
 ## Licence
 

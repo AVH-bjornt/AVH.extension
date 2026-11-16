@@ -1109,6 +1109,12 @@ drawn in code (no image library on this machine) and checked at 96, 32
 and 16 px on Revit's light and dark ribbon greys. They sit in or beside
 a stack, where they show at 16 px.
 
+Update AVH is a green download arrow into a navy tray with a white
+body, the same green as Export's and Import's arrows. A thin white halo
+round the arrow keeps it apart from the tray where they overlap, and
+from the dark ribbon grey. Checked at 96, 48, 32, 24 and 16 px on both
+greys beside Import Schedule's icon.
+
 After moving buttons between panels or into a stack, restart Revit
 rather than reloading pyRevit. Revit cannot remove a ribbon item, and a
 stack is added in one call that fails if any name in it is still on the
