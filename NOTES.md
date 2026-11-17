@@ -2185,7 +2185,11 @@ with that reason and the rest of the run goes ahead.
 
 ### What the mutations proved
 
-Twenty mutations, each caught (failing checks in brackets). Added at
+Twenty-eight mutations, each caught. Added at 2.47.4: shaft offsets
+not set (8), not read back (2), Set's result ignored (1), no shaft
+fallback (9), the band ignoring the slope (10) or measured at the axis
+rather than the opening's centre (2), levels not sorted (4), columns
+right aligned again (1). Added at
 2.47.2: no second sketch height (9), the same height tried twice (1),
 the level offset ignored (6), the sketch height ignored (7). From
 2.47.1: the face
@@ -2227,6 +2231,33 @@ The harness roof refuses every height but one, either by raising from
 `NewOpening` or as a failure at commit, since which of the two Revit
 did is not known from the dialog text alone.
 
+### When every sketch height is refused: a shaft (2.47.4)
+
+The second Revit 2025 run, with the report naming every height tried,
+settled it: the roof refused a vertical cut at its level, its middle
+and zero alike. The plane was not the cause, so no choice of plane
+will fix it, and the bridge that would have let the alternatives be
+probed in Revit would not pair (401 after every pairing, app restart
+included).
+
+So a floor or roof that refuses every height now gets a shaft
+opening, `NewOpening(base level, top level, profile)`, in a transaction
+of its own. A shaft cuts every floor, roof and ceiling between its
+ends, so it is never left running from level to level: its base and
+top offsets (`WALL_BASE_OFFSET`, `WALL_TOP_OFFSET`, read from the API
+documentation only) are set to `model.shaft_band`, which holds both of
+the host's faces over the whole opening plus 10 mm, and each is read
+back. A shaft whose offsets are refused or do not keep their value is
+rolled back, and the reason reported. The report says "made as a shaft
+opening" so it can be checked in a section.
+
+The harness's shaft cuts any floor or roof that a vertical line through
+its centre meets within its band, and a floor sits under the roof
+between two distant levels, so a shaft left at its levels visibly cuts
+it. `test_openings_model.py` checks the band against the faces sampled
+across the opening at five slopes and leans, both ways: it must hold
+them, and by no more than the margin.
+
 ### The output table is printed in one call
 
 The first Revit run showed the report's columns out of line. pyRevit
@@ -2235,7 +2266,9 @@ was printed a line at a time, so the header was one table and each row
 another, every one sizing its own columns. It is now built whole and
 printed once, cells escaped for `|` and line breaks, and no cell left
 empty. The harness checks the header and rows arrive in one call with
-six columns each. The other buttons that printed tables a line at a
+six columns each, all left aligned: pyRevit marks a `---:` column right
+aligned on header and cells, but the output window right-aligns only
+the header, so the heading drifted off its values (seen at 2.47.1). The other buttons that printed tables a line at a
 time were fixed in 2.47.3.
 
 ### Unverified

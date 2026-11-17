@@ -434,6 +434,8 @@ class BuiltInParameter(object):
     RBS_CONDUIT_OUTER_DIAM_PARAM = "conduit_od"
     RBS_REFERENCE_INSULATION_THICKNESS = "insulation"
     ROOF_LEVEL_OFFSET_PARAM = "roof_offset"
+    WALL_BASE_OFFSET = "shaft_base"
+    WALL_TOP_OFFSET = "shaft_top"
     FLOOR_HEIGHTABOVELEVEL_PARAM = "floor_offset"
 
 
@@ -441,6 +443,63 @@ class Level(Element):
     def __init__(self, elevation):
         Element.__init__(self)
         self.Elevation = elevation
+
+
+class Shaft(Element):
+    """A shaft opening from `base` to `top`, carried by its offsets. It
+    cuts every floor and roof it reaches within that band: the band is
+    run as a vertical line through the shaft's centre in plan, and any
+    host whose solid that line meets is cut, as a real shaft would cut
+    it. So a shaft left running from level to level visibly cuts a floor
+    below the roof it was meant for."""
+
+    def __init__(self, base, top, curves, refuse=False):
+        """`refuse`: False, "refuse" (Set returns False) or "ignore"
+        (Set returns True and keeps 0, which a read back must catch)."""
+        Element.__init__(self)
+        self.base = base
+        self.top = top
+        self.curves = curves
+        base_offset = Parameter(0.0)
+        if refuse == "refuse" or refuse is True:
+            base_offset.Set = lambda value: False
+        elif refuse == "ignore":
+            base_offset.Set = lambda value: True
+        self.params = {"shaft_base": base_offset,
+                       "shaft_top": Parameter(0.0)}
+        self.cut = []
+
+    def get_Parameter(self, name):
+        return self.params.get(name)
+
+    def band(self):
+        return (self.base.Elevation + self.params["shaft_base"].value,
+                self.top.Elevation + self.params["shaft_top"].value)
+
+    def plan(self):
+        """("rect", x, y, hx, hy) or ("circle", x, y, r) in plan."""
+        arcs = [c for c in self.curves.items if isinstance(c, Arc)]
+        if arcs:
+            return ("circle", arcs[0].center.X, arcs[0].center.Y,
+                    arcs[0].radius)
+        xs = [c.a.X for c in self.curves.items]
+        ys = [c.a.Y for c in self.curves.items]
+        return ("rect", (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2,
+                (max(xs) - min(xs)) / 2, (max(ys) - min(ys)) / 2)
+
+    def reaches(self, host):
+        if not isinstance(host, (Floor, RoofBase)):
+            return False
+        low, high = self.band()
+        if high - low < 1e-9:
+            return False
+        shape = self.plan()
+        line = Line(XYZ(shape[1], shape[2], low), XYZ(shape[1], shape[2],
+                                                     high))
+        return host.solid.IntersectWithCurve(line, None).SegmentCount > 0
+
+    def hole(self, host):
+        return self.plan()
 
 
 class BuiltInCategory(object):
@@ -533,9 +592,12 @@ class Create(object):
         self.doc = doc
 
     def NewOpening(self, host, a, b):
-        """NewOpening(wall, XYZ, XYZ) or NewOpening(host, CurveArray,
-        bool), the two overloads the script uses."""
+        """NewOpening(wall, XYZ, XYZ), NewOpening(host, CurveArray,
+        bool) or NewOpening(level, level, CurveArray), a shaft: the three
+        overloads the script uses."""
         doc = self.doc
+        if isinstance(host, Level):
+            return self.new_shaft(host, a, b)
         perpendicular = b if isinstance(a, CurveArray) else None
         doc.calls.append(("NewOpening", host, a, b, perpendicular))
         if host in doc.refuse_hosts:
@@ -576,6 +638,14 @@ class Create(object):
         doc.pending.append((host, hole, opening))
         return opening
 
+    def new_shaft(self, base, top, curves):
+        doc = self.doc
+        if doc.no_shafts:
+            raise Exception(u"Revit would not make a shaft here")
+        shaft = Shaft(base, top, curves, refuse=doc.shaft_params_refuse)
+        doc.pending_shafts.append(shaft)
+        return shaft
+
     def NewFamilyInstance(self, point, symbol, host, level, structural):
         doc = self.doc
         if not symbol.IsActive:
@@ -603,6 +673,10 @@ class Document(object):
         self.pending_errors = []
         self.instances = []
         self.refuse_hosts = set()
+        self.pending_shafts = []
+        self.shafts = []
+        self.no_shafts = False
+        self.shaft_params_refuse = False
         self.levels = []
         self.sketch_heights = []
         self.misplace = False
@@ -634,6 +708,13 @@ class Document(object):
             return False
         for host, hole, _ in self.pending:
             host.solid.holes.append(hole)
+        for shaft in self.pending_shafts:
+            self.shafts.append(shaft)
+            for host in self.hosts:
+                if shaft.reaches(host):
+                    host.solid.holes.append(shaft.hole(host))
+                    shaft.cut.append(host)
+        self.pending_shafts = []
         for instance in self.pending_instances:
             instance.refresh()
             instance.wall.solid.holes.append(instance.cut())
@@ -642,6 +723,7 @@ class Document(object):
         return True
 
     def rollback(self):
+        self.pending_shafts = []
         for instance in self.pending_instances:
             self.instances.remove(instance)
         self.pending = []
@@ -753,6 +835,8 @@ class Collector(object):
             self.result = list(self.doc.links)
         elif cls is FamilySymbol:
             self.result = list(self.doc.symbols)
+        elif cls is Level:
+            self.result = list(self.doc.levels)
         else:
             self.result = []
         return self
@@ -781,6 +865,7 @@ def make_db():
             XYZ=XYZ, Line=Line, Arc=Arc, CurveArray=CurveArray,
             Solid=Solid, GeometryInstance=GeometryInstance,
             Options=Options, Wall=Wall, Floor=Floor, RoofBase=RoofBase,
+            Level=Level,
             WallKind=WallKind, BuiltInParameter=BuiltInParameter,
             BuiltInCategory=BuiltInCategory, FamilySymbol=FamilySymbol,
             RevitLinkInstance=RevitLinkInstance,
@@ -1249,6 +1334,11 @@ check("table: every row has the header's six columns",
       tables and all(row.count(u"|") == 7
                      for table in tables for row in table.split(u"\n")),
       tables)
+check("table: every column left aligned, as the output window only "
+      "right-aligns a header",
+      tables and all((table.split(u"\n") + [u""])[1] ==
+                     u"| :--- | :--- | :--- | :--- | :--- | :--- |"
+                     for table in tables), tables)
 check("table: before the run each row says what will happen",
       tables and tables[0].count(u"will be cut") == 2, tables)
 
@@ -1296,7 +1386,9 @@ check("sketch plane: a refusal at commit is also tried again",
       u"made, sketched at its level" in rec.text(), rec.text())
 
 # Offset 0.5, so level and offset (-0.5) is not the project's zero.
+# No shaft either, so nothing at all is accepted.
 roof, vent, doc = roof_on_level("nowhere", offset=0.5)
+doc.no_shafts = True
 rec = run_script(doc, [roof], settings())
 check("sketch plane: nowhere accepted, every height tried once",
       len(doc.sketch_heights) == 4 and not roof.solid.holes,
@@ -1308,6 +1400,9 @@ check("sketch plane: the report names every height tried",
       u"the host, the project's zero)" in rec.text(), rec.text())
 check("sketch plane: counted as not cut",
       any(u"0 opening(s) cut" in a for a in rec.alerts), rec.alerts)
+check("sketch plane: the shaft's refusal is reported too",
+      u"shaft: Revit would not make a shaft here" in rec.text(),
+      rec.text())
 
 # A roof on a level at the project's zero, no offset: its level and the
 # project's zero are one height, and it is tried once.
@@ -1316,6 +1411,86 @@ rec = run_script(doc, [roof], settings())
 check("sketch plane: the same height is not tried twice",
       len(doc.sketch_heights) == len(set(doc.sketch_heights)) == 2,
       doc.sketch_heights)
+
+# 22. A roof that refuses a vertical cut at every height, as one did in
+#     Revit 2025, gets a shaft kept to the roof's own thickness. The
+#     levels are far apart and a floor sits between them under the
+#     pipe, so a shaft run from level to level would cut it.
+def shaft_case(slope=37, shape=model.RECTANGULAR, refuse=False):
+    roof = SlopedRoof(slope, 300 * MM)
+    low_level, high_level = Level(-15.0), Level(10.0)
+    lowest = Level(-20.0)
+    roof.LevelId = low_level.Id
+    roof.sketch_z = 99.0                     # every height refused
+    floor = Floor((-5.0, -5.0, -6.0), (5.0, 5.0, -6.0 + 250 * MM))
+    vent = Pipe((0.0, 0.0, -1.0), (0.0, 0.0, 3.0), 152.4)
+    doc = Document(hosts=[roof, floor], pipes=[vent])
+    # Deliberately unsorted, and in an order where taking the last
+    # level below the band without sorting first gives the lowest.
+    doc.levels.extend([low_level, high_level, lowest])
+    doc.shaft_params_refuse = refuse
+    rec = run_script(doc, [roof], settings(shape=shape))
+    return roof, floor, vent, doc, rec
+
+
+for shape in model.SHAPES:
+    roof, floor, vent, doc, rec = shaft_case(shape=shape)
+    label = u"shaft, {0}: ".format(shape)
+    check(label + u"made, and says it is a shaft",
+          len(doc.shafts) == 1 and
+          u"made as a shaft opening through the roof only" in rec.text(),
+          rec.text())
+    check(label + u"the roof is cut and the pipe is clear",
+          len(roof.solid.holes) == 1 and crossing_count(roof, vent) == 0,
+          roof.solid.holes)
+    check(label + u"the floor below is not cut", not floor.solid.holes,
+          floor.solid.holes)
+    if doc.shafts:
+        shaft = doc.shafts[0]
+        low, high = shaft.band()
+        check(label + u"hung from the level below and the level above",
+              shaft.base.Elevation == -15.0 and shaft.top.Elevation == 10.0,
+              (shaft.base.Elevation, shaft.top.Elevation))
+        # 300 mm at 37 degrees is 376 mm deep vertically, and over the
+        # 210 mm opening the faces rise 105 tan 37 either side of its
+        # centre; a 10 mm margin top and bottom.
+        slope = math.radians(37)
+        expected = (300 / math.cos(slope) + 2 * 105 * math.tan(slope) +
+                    20) * MM
+        check(label + u"its band is the roof's thickness, not a storey",
+              abs((high - low) - expected) < 1 * MM,
+              ((high - low) / MM, expected / MM))
+        check(label + u"the sketch is drawn at the base level",
+              all((c.center.Z if isinstance(c, Arc) else c.a.Z) == -15.0
+                  for c in shaft.curves.items))
+    check(label + u"counted as cut",
+          any(u"1 opening(s) cut" in a for a in rec.alerts), rec.alerts)
+
+# A shaft whose offset will not take its value is not kept: left at its
+# levels it would cut everything from one to the other.
+roof, floor, vent, doc, rec = shaft_case(refuse=True)
+check("shaft offsets refused: nothing kept", not doc.shafts and
+      not roof.solid.holes and not floor.solid.holes, doc.shafts)
+check("shaft offsets refused: said so",
+      u"shaft: the shaft would not take WALL_BASE_OFFSET" in rec.text(),
+      rec.text())
+
+# One that says yes and keeps something else is caught by reading back.
+roof, floor, vent, doc, rec = shaft_case(refuse="ignore")
+check("shaft offset not kept: nothing kept", not doc.shafts and
+      not roof.solid.holes and not floor.solid.holes, doc.shafts)
+check("shaft offset not kept: said so",
+      u"did not keep its value" in rec.text(), rec.text())
+
+# A wall never gets a shaft: its openings are not vertical.
+wall = Wall(0.0, 30.0, 300 * MM)
+pipe = Pipe((5.0, -3.0, 4.0), (5.0, 3.0, 4.0), 110)
+doc = Document(hosts=[wall], pipes=[pipe])
+doc.refuse_hosts.add(wall)
+doc.levels.append(Level(0.0))
+rec = run_script(doc, [wall], settings())
+check("wall refused: no shaft tried", not doc.shafts and
+      u"shaft" not in rec.text(), rec.text())
 
 # --------------------------------------------------------------------------
 # The checks can fail

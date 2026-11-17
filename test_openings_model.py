@@ -352,6 +352,73 @@ check("boxes: apart", not model.boxes_touch(((0, 0, 0), (1, 1, 1)),
                                             ((1.1, 0, 0), (2, 1, 1))))
 
 # --------------------------------------------------------------------------
+# Shafts: the band a shaft must span
+# --------------------------------------------------------------------------
+
+
+def faces_under(opening, entry, exit, m, frame):
+    """Heights of the two faces (planes through entry and exit, normal
+    m) at points across the opening's footprint in plan."""
+    cu, cv, _ = frame.local(opening.center)
+    if opening.shape == model.CIRCULAR:
+        half_u = half_v = opening.diameter / 2.0
+    else:
+        half_u, half_v = opening.width / 2.0, opening.height / 2.0
+    heights = []
+    for i in range(-20, 21):
+        for j in range(-20, 21):
+            if opening.shape == model.CIRCULAR and \
+                    math.hypot(i, j) > 20.0 + 1e-9:
+                continue            # outside the circle
+            x = cu + half_u * i / 20.0
+            y = cv + half_v * j / 20.0
+            for point in (entry, exit):
+                # m . (p - point) = 0 for p = (x, y, z)
+                z = point[2] - (m[0] * (x - point[0]) +
+                                m[1] * (y - point[1])) / m[2]
+                heights.append(z)
+    return heights
+
+
+for slope, tilt, heading in ((0, 0, 0), (30, 0, 0), (37, 0, 0),
+                             (30, 30, 0), (45, 20, 90)):
+    entry, exit, m = roof_case(slope, tilt, heading)
+    for shape in model.SHAPES:
+        opening, _ = model.size_opening(entry, exit, 152.4 * MM, floor,
+                                        settings(shape=shape, amount=25,
+                                                 round_to=10), m, m)
+        low, high = model.shaft_band(entry, exit, opening, [m, m])
+        heights = faces_under(opening, entry, exit, m, floor)
+        label = u"shaft band: roof {0}, pipe {1} towards {2}, {3}".format(
+            slope, tilt, heading, shape)
+        check(label + u", holds both faces under the opening",
+              low <= min(heights) + 1e-9 and high >= max(heights) - 1e-9,
+              (low / MM, min(heights) / MM, high / MM, max(heights) / MM))
+        check(label + u", no more than the margin beyond them",
+              min(heights) - low <= model.SHAFT_MARGIN_FT + 1 * MM and
+              high - max(heights) <= model.SHAFT_MARGIN_FT + 1 * MM,
+              ((min(heights) - low) / MM, (high - max(heights)) / MM))
+
+square = model.Opening(model.RECTANGULAR, floor, (0.0, 0.0, 0.0),
+                       width=200 * MM, height=100 * MM)
+check("shaft band: a flat or unknown face does not rise",
+      model.face_spread(square, None) == 0.0 and
+      model.face_spread(square, (0.0, 0.0, 1.0)) == 0.0)
+check("shaft band: a 45 degree face rises one for one across the width",
+      close(model.face_spread(square, (-1.0, 0.0, 1.0)), 100 * MM))
+
+levels = [0.0, 10.0, 20.0]
+check("shaft levels: between two levels",
+      model.shaft_levels(levels, 12.0, 13.0) == (1, 2))
+check("shaft levels: on a level is that level",
+      model.shaft_levels(levels, 10.0, 13.0) == (1, 2))
+check("shaft levels: above every level uses the top one twice",
+      model.shaft_levels(levels, 22.0, 23.0) == (2, 2))
+check("shaft levels: below every level uses the bottom one twice",
+      model.shaft_levels(levels, -3.0, -2.0) == (0, 0))
+check("shaft levels: no levels", model.shaft_levels([], 0.0, 1.0) is None)
+
+# --------------------------------------------------------------------------
 # The checks can fail
 # --------------------------------------------------------------------------
 

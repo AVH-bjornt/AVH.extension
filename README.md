@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.47.3.** The authoritative number is `__version__` in
+**Version 2.47.4.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -226,6 +226,13 @@ the host's level and offset first, then its level, its middle and the
 project's zero, each in a step of its own, and keeps the first Revit
 accepts. The hole is the same whichever, and the report names the
 plane when it was not the first.
+
+If Revit refuses every one, as it did for a sloped roof in Revit 2025,
+the opening is made as a shaft instead, with its base and top offsets
+set so it spans only the host's own thickness under the opening. A
+shaft cuts every floor, roof and ceiling in its height range, which is
+why the range is kept that tight, and the report says when a shaft was
+used.
 
 **Point Cloud to Toposolid.** Pick a linked point cloud, a point
 spacing in metres, a toposolid type and a level. The cloud is read in
@@ -559,8 +566,9 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.46.0 | Clash Detector: clearance zones round pipes, soft clashes in violet; a pipe never clashes with its own fittings or insulation | Not yet run in Revit |
 | 2.47.0 | Model panel: Pipe Openings, rectangular or circular openings round pipes and conduits through selected walls, floors and roofs | Ran in Revit: a wall opening made; the report table's columns out of line |
 | 2.47.1 | Pipe Openings: sloped roofs and floors sized from their real face slope; report table printed whole so its columns line up | Ran in Revit 2025: the table lined up; a roof opening refused with "Can't change plane of Opening Cut Sketch" |
-| 2.47.2 | Pipe Openings: a floor or roof opening's sketch tried at the host's level and offset, its level, its middle and zero, and kept where Revit accepts it; a refusal names every height tried | Ran in Revit 2025: the roof still refused with the same message, and that version's report could not show whether every height was tried |
-| 2.47.3 | Report tables printed whole in one go so their columns line up: Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid | Not yet run in Revit, current |
+| 2.47.2 | Pipe Openings: a floor or roof opening's sketch tried at the host's level and offset, its level, its middle and zero, and kept where Revit accepts it; a refusal names every height tried | Ran in Revit 2025: the roof refused at every height tried (its level, its middle, zero), so the plane is not the cause |
+| 2.47.3 | Report tables printed whole in one go so their columns line up: Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid | Not yet run in Revit |
+| 2.47.4 | Pipe Openings: a floor or roof that refuses a vertical cut at every sketch height gets a shaft opening kept to its own thickness; every report column left aligned | Not yet run in Revit, current |
 
 ## Licence
 

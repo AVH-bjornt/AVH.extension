@@ -101,6 +101,7 @@ class Row(object):
         self.done = False
         self.result = u""
         self.warning = u""            # made, but worth a look
+        self.normals = (None, None)   # the faces' normals, entry and exit
 
 
 # Shown on a floor or roof row whose face normals could not be read, so
@@ -188,6 +189,7 @@ def plan(hosts, pipes, settings, round_symbol_ok):
                          u"model or the extension".format(FAMILY_NAME)
                 opening = None
             row = Row(host, pipe, entry, exit, opening, reason)
+            row.normals = (entry_normal, exit_normal)
             if opening is not None and host.kind != model.WALL and \
                     (entry_normal is None or exit_normal is None):
                 row.warning = FLAT_WARNING
@@ -435,14 +437,73 @@ def make(doc, row, symbol, z=None):
     return doc.Create.NewOpening(host.element, profile(opening, z), False)
 
 
-def attempt(doc, row, symbol, z):
+def model_levels(doc):
+    """[(elevation, level)] for every level, lowest first."""
+    found = []
+    try:
+        for level in DB.FilteredElementCollector(doc).OfClass(DB.Level):
+            try:
+                found.append((level.Elevation, level))
+            except BaseException:
+                continue
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+    found.sort(key=lambda pair: pair[0])
+    return found
+
+
+# A shaft opening's offsets from its base and top levels. Shafts carry
+# the same base and top parameters as walls. Read from the API
+# documentation only; the write is read back, so a wrong guess fails
+# that opening rather than cutting a shaft from level to level.
+SHAFT_OFFSETS = ("WALL_BASE_OFFSET", "WALL_TOP_OFFSET")
+
+
+def set_length(element, name, value):
+    """Set a length parameter by BuiltInParameter name and read it
+    back. Raises with the reason when either fails."""
+    member = getattr(DB.BuiltInParameter, name, None)
+    parameter = element.get_Parameter(member) if member is not None \
+        else None
+    if parameter is None or parameter.IsReadOnly:
+        raise Exception(u"the shaft has no {0} that can be set".format(
+            name))
+    if not parameter.Set(value):
+        raise Exception(u"the shaft would not take {0}".format(name))
+    if abs(parameter.AsDouble() - value) > 1e-6:
+        raise Exception(u"the shaft's {0} did not keep its value".format(
+            name))
+
+
+def make_shaft(doc, row, symbol=None, z=None):
+    """A shaft opening spanning only the host's own thickness at the
+    opening (`model.shaft_band`), for a floor or roof that refuses a
+    vertical cut from a sketch at every height. Returns the shaft."""
+    levels = model_levels(doc)
+    bottom, top = model.shaft_band(row.entry, row.exit, row.opening,
+                                   row.normals)
+    chosen = model.shaft_levels([z for z, _ in levels], bottom, top)
+    if chosen is None:
+        raise Exception(u"the model has no levels to hang a shaft from")
+    base_z, base_level = levels[chosen[0]]
+    top_z, top_level = levels[chosen[1]]
+    shaft = doc.Create.NewOpening(base_level, top_level,
+                                  profile(row.opening, base_z))
+    if shaft is None:
+        raise Exception(u"Revit made no shaft")
+    set_length(shaft, SHAFT_OFFSETS[0], bottom - base_z)
+    set_length(shaft, SHAFT_OFFSETS[1], top - top_z)
+    return shaft
+
+
+def attempt(doc, row, symbol, z, maker=None):
     """One try at one opening in its own transaction. Returns the
     reason it failed, or u"" when Revit kept it."""
     transaction = DB.Transaction(doc, TITLE)
     transaction.Start()
     failures = collect_failures(transaction)
     try:
-        element = make(doc, row, symbol, z)
+        element = (maker or make)(doc, row, symbol, z)
         if element is None:
             raise Exception(u"Revit made nothing")
     except BaseException as exc:
@@ -475,6 +536,21 @@ def make_all(doc, rows, symbol):
                     break
                 if why not in reasons:
                     reasons.append(why)
+            if not row.done and row.host.kind != model.WALL:
+                # Revit 2025 refused a vertical cut into a sloped roof at
+                # every sketch height ("Can't change plane of Opening
+                # Cut Sketch"), so a shaft is the last resort.
+                why = attempt(doc, row, symbol, None, maker=make_shaft)
+                if not why:
+                    row.done = True
+                    row.result = (u"made as a shaft opening through the "
+                                  u"{0} only; a vertical cut was refused "
+                                  u"({1})".format(
+                                      HOST_WORDS[row.host.kind].lower(),
+                                      u"; ".join(reasons)))
+                    made += 1
+                elif why not in reasons:
+                    reasons.append(u"shaft: " + why)
             if not row.done:
                 # Say what was tried: a refusal at one height and at
                 # four read the same otherwise, and so does a run of an
@@ -562,7 +638,11 @@ def print_rows(rows, settings, after):
     lines = [
         u"| Host | Pipe | Pipe \u00f8 mm | Opening mm | Off square | {0} |"
         .format(u"Result" if after else u"What happens"),
-        u"| :--- | :--- | ---: | ---: | ---: | :--- |",
+        # Every column left aligned. pyRevit marks a ---: column right
+        # aligned on both header and cells, but its output window
+        # right-aligns only the header, so the heading drifts away from
+        # its values (seen in Revit 2025 at 2.47.1).
+        u"| :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
     for row in rows:
         size = row.opening.size_text() if row.opening else u"-"

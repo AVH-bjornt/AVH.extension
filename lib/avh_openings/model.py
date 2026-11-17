@@ -505,3 +505,72 @@ def size_opening(entry, exit, pipe_diameter, frame, settings,
                    width=round_up(width, settings.round_to),
                    height=round_up(height, settings.round_to),
                    pipe_diameter=pipe_diameter, skew=skew), u""
+
+
+
+# --------------------------------------------------------------------------
+# Shafts
+# --------------------------------------------------------------------------
+
+# Above and below the host, so the shaft's ends are clear of its faces
+# and a rounding error cannot leave a skin. Ten millimetres.
+SHAFT_MARGIN_FT = 10.0 / MM_PER_FOOT
+
+
+def face_spread(opening, normal):
+    """How far a face with this normal rises or falls from the opening's
+    centre to the farthest point of the opening, in plan. 0 for a flat
+    face or an unknown one."""
+    if normal is None:
+        return 0.0
+    m = unit(normal)
+    if m is None or abs(m[2]) < 1e-9:
+        return 0.0
+    frame = opening.frame
+    slope_u = dot(m, frame.u) / m[2]
+    slope_v = dot(m, frame.v) / m[2]
+    if opening.shape == CIRCULAR:
+        return opening.diameter / 2.0 * math.hypot(slope_u, slope_v)
+    return (abs(slope_u) * opening.width / 2.0 +
+            abs(slope_v) * opening.height / 2.0)
+
+
+def shaft_band(entry, exit, opening, normals):
+    """(bottom, top) heights a shaft opening must span to cut the host
+    over the whole opening and nothing more.
+
+    Each face is the plane through `entry` or `exit` with its normal.
+    Its height above the opening's centre is found from that plane, and
+    across the opening it rises and falls by `face_spread`. The band
+    holds both faces over the whole opening, plus a margin. A shaft cuts
+    every floor, roof and ceiling in its band, which is why it is kept
+    to the host's own thickness rather than run from level to level.
+    """
+    center = opening.center
+    lows = []
+    highs = []
+    for point, normal in zip((entry, exit), normals):
+        m = unit(normal) if normal is not None else None
+        height = point[2]
+        if m is not None and abs(m[2]) > 1e-9:
+            height = point[2] - (m[0] * (center[0] - point[0]) +
+                                 m[1] * (center[1] - point[1])) / m[2]
+        spread = face_spread(opening, normal)
+        lows.append(height - spread)
+        highs.append(height + spread)
+    return (min(lows) - SHAFT_MARGIN_FT, max(highs) + SHAFT_MARGIN_FT)
+
+
+def shaft_levels(elevations, bottom, top):
+    """(base index, top index) into `elevations`, which is sorted
+    ascending: the highest level at or below the band's bottom and the
+    lowest at or above its top, else the nearest there is. The shaft's
+    offsets then carry it from those levels to the band. None when there
+    are no levels at all."""
+    if not elevations:
+        return None
+    below = [i for i, z in enumerate(elevations) if z <= bottom + 1e-9]
+    above = [i for i, z in enumerate(elevations) if z >= top - 1e-9]
+    base = below[-1] if below else 0
+    upper = above[0] if above else len(elevations) - 1
+    return base, upper
