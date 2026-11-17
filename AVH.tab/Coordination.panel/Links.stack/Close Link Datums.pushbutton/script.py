@@ -366,7 +366,7 @@ def report(skipped, results):
         # The table goes out whole in one print_md: pyRevit renders each
         # call as a document of its own, so a table printed a line at a time
         # comes out as one table per row and the columns do not line up.
-        lines = [u"| Link | Result | Route |", u"| --- | --- | --- |"]
+        lines = [u"| Link | Result | Route |", u"| :--- | :--- | :--- |"]
         for link, outcome, detail, route in results:
             text = outcome if not detail else u"{0}: {1}".format(
                 outcome, detail)

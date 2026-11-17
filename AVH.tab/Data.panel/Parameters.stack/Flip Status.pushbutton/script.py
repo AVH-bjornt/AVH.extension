@@ -376,7 +376,7 @@ def report(tally, problems, missing_categories, grouped_skipped, fixed_names):
         # comes out as one table per row and the columns do not line up.
         lines = [u"| Category | Instances | Mirrored | Hand flipped | Facing "
                  u"flipped |",
-                 u"| --- | ---: | ---: | ---: | ---: |"]
+                 u"| :--- | :--- | :--- | :--- | :--- |"]
         for category, elements, mirrored, hand, facing in rows:
             lines.append(u"| {0} | {1} | {2} | {3} | {4} |".format(
                 table_cell(category), table_cell(elements),

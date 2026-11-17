@@ -568,7 +568,7 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.47.1 | Pipe Openings: sloped roofs and floors sized from their real face slope; report table printed whole so its columns line up | Ran in Revit 2025: the table lined up; a roof opening refused with "Can't change plane of Opening Cut Sketch" |
 | 2.47.2 | Pipe Openings: a floor or roof opening's sketch tried at the host's level and offset, its level, its middle and zero, and kept where Revit accepts it; a refusal names every height tried | Ran in Revit 2025: the roof refused at every height tried (its level, its middle, zero), so the plane is not the cause |
 | 2.47.3 | Report tables printed whole in one go so their columns line up: Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid | Not yet run in Revit |
-| 2.47.4 | Pipe Openings: a floor or roof that refuses a vertical cut at every sketch height gets a shaft opening kept to its own thickness; every report column left aligned | Not yet run in Revit, current |
+| 2.47.4 | Pipe Openings: a floor or roof that refuses a vertical cut at every sketch height gets a shaft opening kept to its own thickness; every report column left aligned, in Pipe Openings and in Stair Ratio, Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid, Align Views, Batch Sheets and Rename Views | Not yet run in Revit, current |
 
 ## Licence
 

@@ -637,7 +637,7 @@ def print_pairs(header, pairs):
     print_md. pyRevit renders each print_md call as a document of its
     own, so a table printed a line at a time comes out as one table per
     row and the columns do not line up."""
-    lines = [u"| {0} | Value |".format(header), u"| --- | --- |"]
+    lines = [u"| {0} | Value |".format(header), u"| :--- | :--- |"]
     for label, value in pairs:
         lines.append(u"| {0} | {1} |".format(
             table_cell(label), table_cell(value)))

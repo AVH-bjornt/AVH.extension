@@ -212,7 +212,7 @@ def report(tally, workset_name):
         # call as a document of its own, so a table printed a line at a time
         # comes out as one table per row and the columns do not line up.
         lines = [u"| Datum | Moved | Already there | Left alone |",
-                 u"| --- | ---: | ---: | ---: |"]
+                 u"| :--- | :--- | :--- | :--- |"]
         for label, moved, already, skipped in rows:
             lines.append(u"| {0} | {1} | {2} | {3} |".format(
                 table_cell(label), table_cell(moved), table_cell(already),

@@ -322,7 +322,7 @@ def report(typed, actual, level_name, offset_feet, below_all, notes):
     # comes out as one table per row and the columns do not line up.
     output.print_md(u"\n".join([
         u"| Point | Northing | Easting | Elevation |",
-        u"| --- | ---: | ---: | ---: |",
+        u"| :--- | :--- | :--- | :--- |",
         u"| Asked for | {1} | {0} | {2} |".format(
             *[table_cell(model.format_metres(value)) for value in typed]),
         u"| Placed at | {1} | {0} | {2} |".format(

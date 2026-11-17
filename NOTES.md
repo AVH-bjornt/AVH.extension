@@ -2336,6 +2336,11 @@ Flip Status, Place at Coordinate and Point Cloud to Toposolid in 2.47.3).
 Cells go through `table_cell`, which turns `|` and line breaks into
 something harmless and an empty cell into `-`; each harness checks the
 table arrives whole with the header's column count (`table_problems`).
+Every column is `:---`. pyRevit's markdown puts `align="right"` on both
+the header and the cells of a `---:` column, but the output window
+right aligns only the header, so it drifts off its values, worse the
+wider the window (seen on Pipe Openings 2.47.1). The harness check
+refuses any other rule.
 
 ## Reaching the active document
 
