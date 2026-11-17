@@ -174,7 +174,7 @@ def report(source, source_corner, rows):
                          model.mm(source_corner[1])),
         u"",
         u"| View | Result |",
-        u"| --- | --- |",
+        u"| :--- | :--- |",
     ]
     for placed, text in rows:
         lines.append(u"| {0} {1} | {2} |".format(

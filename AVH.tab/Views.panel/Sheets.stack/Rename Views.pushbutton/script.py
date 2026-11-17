@@ -208,7 +208,7 @@ def write(doc, changes):
 def report(changes):
     lines = [u"### {0}".format(TITLE),
              u"{0} renamed.".format(len(changes)), u"",
-             u"| | Was | Now |", u"| --- | --- | --- |"]
+             u"| | Was | Now |", u"| :--- | :--- | :--- |"]
     for item, row in changes:
         lines.append(u"| {0} {1} | {2} | {3} |".format(
             output.linkify(item.element.Id), item.kind,

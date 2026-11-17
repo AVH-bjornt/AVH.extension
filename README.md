@@ -550,7 +550,7 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.45.0 | Clash Detector setup: model A and model B, one category list with A and B buttons under discipline headings, presets, tolerance beside Run | Not yet run in Revit |
 | 2.46.0 | Clash Detector: clearance zones round pipes, soft clashes in violet; a pipe never clashes with its own fittings or insulation | Not yet run in Revit |
 | 2.47.0 | Model panel: Pipe Openings, rectangular or circular openings round pipes and conduits through selected walls, floors and roofs | Not yet run in Revit |
-| 2.47.2 | Report tables printed whole in one go so their columns line up: Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid | Not yet run in Revit, current |
+| 2.47.2 | Report tables printed whole in one go so their columns line up: Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid; every column left aligned, since right aligned headers drift off their values | Not yet run in Revit, current |
 
 ## Licence
 

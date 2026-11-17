@@ -63,6 +63,14 @@ def table_problems(printed, header, data_rows=None):
     if data_rows is not None and len(rows) - 2 != data_rows:
         problems.append(u"{0} data rows, wanted {1}".format(
             len(rows) - 2, data_rows))
+    # Every column left aligned. pyRevit's output window right aligns a
+    # ---: header but leaves its cells left aligned, so the header drifts
+    # off its column (seen in Revit at 2.47.1); a bare --- centres the
+    # header. Only :--- lines up.
+    if len(rows) > 1 and [cell.strip() for cell in
+                          rows[1].split(u"|")[1:-1]] != [u":---"] * (
+                              header.count(u"|") - 1):
+        problems.append(u"not every column :--- in the rule: " + rows[1])
     columns = header.count(u"|")
     for row in rows:
         if row.count(u"|") != columns:

@@ -436,7 +436,7 @@ def report(entries):
                                              e[0].level, e[0].data.element_id))
     table = [u"| Stair | Level | Use | Riser mm | Going mm | Pitch | Result "
              u"| Needs attention |",
-             u"| --- | --- | --- | ---: | ---: | ---: | --- | --- |"]
+             u"| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |"]
     for reading, use, results in entries:
         names = []
         for result in problems_of(results):

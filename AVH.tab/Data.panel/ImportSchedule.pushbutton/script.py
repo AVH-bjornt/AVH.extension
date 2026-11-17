@@ -126,7 +126,7 @@ def report_plan(snapshot, diff, plan):
         # call as a document of its own, so a table printed a line at a time
         # comes out as one table per row and the columns do not line up.
         lines = [u"| Element | Column | Was | Becomes |",
-                 u"| --- | --- | --- | --- |"]
+                 u"| :--- | :--- | :--- | :--- |"]
         for planned in plan.ready[:MAX_LISTED]:
             change = planned.change
             lines.append(u"| {0} | {1} | {2} | {3} |".format(

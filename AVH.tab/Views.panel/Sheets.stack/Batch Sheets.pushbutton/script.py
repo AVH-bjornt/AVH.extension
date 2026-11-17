@@ -173,7 +173,7 @@ def create(doc, symbol, rows):
 def report(made, titleblock):
     lines = [u"### {0}".format(TITLE),
              u"{0} sheet(s) made with {1}.".format(len(made), titleblock),
-             u"", u"| | Number | Name |", u"| --- | --- | --- |"]
+             u"", u"| | Number | Name |", u"| :--- | :--- | :--- |"]
     for sheet, row in made:
         lines.append(u"| {0} | {1} | {2} |".format(
             output.linkify(sheet.Id), row.number.replace(u"|", u"/"),
