@@ -623,6 +623,27 @@ def attach(transaction, catcher):
         return False
 
 
+def table_cell(text):
+    """Text that cannot break a markdown table: a pipe character would
+    start a new column and a line break a new row. Never empty, so a row
+    always has the header's column count."""
+    text = to_text(text).replace(u"|", u"/")
+    text = text.replace(u"\r", u" ").replace(u"\n", u" ").strip()
+    return text or u"-"
+
+
+def print_pairs(header, pairs):
+    """A two column table of (label, value) pairs, printed whole in one
+    print_md. pyRevit renders each print_md call as a document of its
+    own, so a table printed a line at a time comes out as one table per
+    row and the columns do not line up."""
+    lines = [u"| {0} | Value |".format(header), u"| --- | --- |"]
+    for label, value in pairs:
+        lines.append(u"| {0} | {1} |".format(
+            table_cell(label), table_cell(value)))
+    output.print_md(u"\n".join(lines))
+
+
 def report_vertices(points, toposolid):
     gaps = model.vertex_gaps(points, vertices_of(toposolid))
     if gaps is None:
@@ -630,49 +651,46 @@ def report_vertices(points, toposolid):
                         u"surface was not compared with the cloud.")
         return
     output.print_md(u"#### The surface against the cloud")
-    output.print_md(u"| | |")
-    output.print_md(u"| --- | --- |")
-    output.print_md(u"| Points kept as vertices | {0} of {1} |".format(
-        gaps["matched"], len(points)))
-    output.print_md(u"| Points with no vertex | {0} |".format(
-        gaps["missing"]))
-    output.print_md(u"| Vertices with no point | {0} |".format(gaps["extra"]))
-    output.print_md(u"| Height difference, worst | {0} mm |".format(
-        format_metres(model.feet_to_metres(gaps["worst"]) * 1000.0, 0)))
-    output.print_md(u"| Height difference, average | {0} mm |".format(
-        format_metres(model.feet_to_metres(gaps["mean"]) * 1000.0, 0)))
+    pairs = [
+        (u"Points kept as vertices", u"{0} of {1}".format(
+            gaps["matched"], len(points))),
+        (u"Points with no vertex", gaps["missing"]),
+        (u"Vertices with no point", gaps["extra"]),
+        (u"Height difference, worst", u"{0} mm".format(
+            format_metres(model.feet_to_metres(gaps["worst"]) * 1000.0, 0))),
+        (u"Height difference, average", u"{0} mm".format(
+            format_metres(model.feet_to_metres(gaps["mean"]) * 1000.0, 0))),
+    ]
     if gaps["worst_at"] is not None:
-        output.print_md(u"| Worst at (internal, m) | X {0}, Y {1} |".format(
+        pairs.append((u"Worst at (internal, m)", u"X {0}, Y {1}".format(
             format_metres(model.feet_to_metres(gaps["worst_at"][0]), 1),
-            format_metres(model.feet_to_metres(gaps["worst_at"][1]), 1)))
+            format_metres(model.feet_to_metres(gaps["worst_at"][1]), 1))))
+    print_pairs(u"Check", pairs)
 
 
 def report(cloud, numbers, toposolid, mode, reading, filtering=None):
     output.print_md(u"### {0}".format(TITLE))
-    output.print_md(u"| | |")
-    output.print_md(u"| --- | --- |")
-    output.print_md(u"| Point cloud | {0} |".format(element_label(cloud)))
-    output.print_md(u"| Toposolid | id {0} |".format(
-        element_id_text(toposolid)))
-    output.print_md(u"| Points | {0} at {1} m spacing |".format(
-        numbers["count"], format_metres(numbers["spacing"], 2)))
-    output.print_md(u"| Samples read | {0} in {1} tile(s) |".format(
-        reading.grid.samples, reading.tiles_read))
-    output.print_md(u"| Extent | {0} m by {1} m |".format(
-        format_metres(numbers["width"], 1),
-        format_metres(numbers["depth"], 1)))
-    output.print_md(u"| Points read back | {0} |".format(
-        u"through the cloud's transform"
-        if reading.frame == model.TRANSFORMED else u"as returned"))
-    output.print_md(u"| Point heights read by Revit as | {0} |".format(
-        u"relative to the level, and corrected" if mode == model.RELATIVE
-        else u"absolute"))
-    output.print_md(u"| Method | {0} |".format(
-        u"all points averaged" if filtering is None else
-        u"ground filter, largest object {0} m, {1} of {2} squares "
-        u"dropped".format(
-            format_metres(model.feet_to_metres(filtering.window_ft), 1),
-            filtering.removed, filtering.cells)))
+    print_pairs(u"Run", [
+        (u"Point cloud", element_label(cloud)),
+        (u"Toposolid", u"id {0}".format(element_id_text(toposolid))),
+        (u"Points", u"{0} at {1} m spacing".format(
+            numbers["count"], format_metres(numbers["spacing"], 2))),
+        (u"Samples read", u"{0} in {1} tile(s)".format(
+            reading.grid.samples, reading.tiles_read)),
+        (u"Extent", u"{0} m by {1} m".format(
+            format_metres(numbers["width"], 1),
+            format_metres(numbers["depth"], 1))),
+        (u"Points read back", u"through the cloud's transform"
+         if reading.frame == model.TRANSFORMED else u"as returned"),
+        (u"Point heights read by Revit as",
+         u"relative to the level, and corrected" if mode == model.RELATIVE
+         else u"absolute"),
+        (u"Method", u"all points averaged" if filtering is None else
+         u"ground filter, largest object {0} m, {1} of {2} squares "
+         u"dropped".format(
+             format_metres(model.feet_to_metres(filtering.window_ft), 1),
+             filtering.removed, filtering.cells)),
+    ])
     if reading.capped:
         output.print_md(u"- {0} part(s) were sampled, not read in "
                         u"full.".format(reading.capped))

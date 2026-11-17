@@ -305,15 +305,29 @@ def diagnose(frame, shared_feet, internal, placed, actual_shared_feet):
     output.print_md(u"```")
 
 
+def table_cell(text):
+    """Text that cannot break a markdown table: a pipe character would
+    start a new column and a line break a new row. Never empty, so a row
+    always has the header's column count."""
+    text = to_text(text).replace(u"|", u"/")
+    text = text.replace(u"\r", u" ").replace(u"\n", u" ").strip()
+    return text or u"-"
+
+
 def report(typed, actual, level_name, offset_feet, below_all, notes):
     output.print_md(u"### {0}".format(TITLE))
     # Shown N, E, Z to match Revit. `typed` and `actual` are E, N, Z.
-    output.print_md(u"| | Northing | Easting | Elevation |")
-    output.print_md(u"| --- | ---: | ---: | ---: |")
-    output.print_md(u"| Asked for | {1} | {0} | {2} |".format(
-        *[model.format_metres(value) for value in typed]))
-    output.print_md(u"| Placed at | {1} | {0} | {2} |".format(
-        *[model.format_metres(value) for value in actual]))
+    # The table goes out whole in one print_md: pyRevit renders each
+    # call as a document of its own, so a table printed a line at a time
+    # comes out as one table per row and the columns do not line up.
+    output.print_md(u"\n".join([
+        u"| Point | Northing | Easting | Elevation |",
+        u"| --- | ---: | ---: | ---: |",
+        u"| Asked for | {1} | {0} | {2} |".format(
+            *[table_cell(model.format_metres(value)) for value in typed]),
+        u"| Placed at | {1} | {0} | {2} |".format(
+            *[table_cell(model.format_metres(value)) for value in actual]),
+    ]))
 
     output.print_md(u"Hosted on **{0}**, offset {1} m.".format(
         level_name, model.format_metres(model.feet_to_metres(offset_feet))))

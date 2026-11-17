@@ -351,16 +351,28 @@ def pick(candidates):
     return picked
 
 
+def table_cell(text):
+    """Text that cannot break a markdown table: a pipe character would
+    start a new column and a line break a new row. Never empty, so a row
+    always has the header's column count."""
+    text = to_text(text).replace(u"|", u"/")
+    text = text.replace(u"\r", u" ").replace(u"\n", u" ").strip()
+    return text or u"-"
+
+
 def report(skipped, results):
     output.print_md(u"### {0}".format(TITLE))
     if results:
-        output.print_md(u"| Link | Result | Route |")
-        output.print_md(u"| --- | --- | --- |")
+        # The table goes out whole in one print_md: pyRevit renders each
+        # call as a document of its own, so a table printed a line at a time
+        # comes out as one table per row and the columns do not line up.
+        lines = [u"| Link | Result | Route |", u"| --- | --- | --- |"]
         for link, outcome, detail, route in results:
             text = outcome if not detail else u"{0}: {1}".format(
                 outcome, detail)
-            output.print_md(u"| {0} | {1} | {2} |".format(
-                link.name, text, route or u"-"))
+            lines.append(u"| {0} | {1} | {2} |".format(
+                table_cell(link.name), table_cell(text), table_cell(route)))
+        output.print_md(u"\n".join(lines))
     closed = len([r for r in results if r[1] == links.CLOSED])
     output.print_md(u"**{0} of {1} closed.**".format(closed, len(results)))
     if skipped:

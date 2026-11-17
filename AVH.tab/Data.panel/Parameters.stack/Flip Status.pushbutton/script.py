@@ -357,17 +357,31 @@ def write_state(element, label, state, problems, skip_names):
     return wrote_any, skipped, failed
 
 
+def table_cell(text):
+    """Text that cannot break a markdown table: a pipe character would
+    start a new column and a line break a new row. Never empty, so a row
+    always has the header's column count."""
+    text = to_text(text).replace(u"|", u"/")
+    text = text.replace(u"\r", u" ").replace(u"\n", u" ").strip()
+    return text or u"-"
+
+
 def report(tally, problems, missing_categories, grouped_skipped, fixed_names):
     output.print_md(u"### {0}".format(TITLE))
 
     rows = tally.rows()
     if rows:
-        output.print_md(u"| Category | Instances | Mirrored | Hand "
-                        u"flipped | Facing flipped |")
-        output.print_md(u"| --- | ---: | ---: | ---: | ---: |")
+        # The table goes out whole in one print_md: pyRevit renders each
+        # call as a document of its own, so a table printed a line at a time
+        # comes out as one table per row and the columns do not line up.
+        lines = [u"| Category | Instances | Mirrored | Hand flipped | Facing "
+                 u"flipped |",
+                 u"| --- | ---: | ---: | ---: | ---: |"]
         for category, elements, mirrored, hand, facing in rows:
-            output.print_md(u"| {0} | {1} | {2} | {3} | {4} |".format(
-                category, elements, mirrored, hand, facing))
+            lines.append(u"| {0} | {1} | {2} | {3} | {4} |".format(
+                table_cell(category), table_cell(elements),
+                table_cell(mirrored), table_cell(hand), table_cell(facing)))
+        output.print_md(u"\n".join(lines))
 
     output.print_md(u"**{0} element(s) updated, {1} already correct.**".format(
         tally.written, tally.unchanged))

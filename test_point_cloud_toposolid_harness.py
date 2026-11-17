@@ -50,6 +50,41 @@ def check(name, condition, detail=""):
     results.append((name, bool(condition), detail))
 
 
+def table_problems(printed, header, data_rows=None):
+    """Why the markdown table that starts with `header` did not go out
+    whole in one print_md call, or an empty list when it did. pyRevit
+    renders each print_md call as a document of its own, so a table
+    printed a line at a time comes out as one table per row and the
+    columns do not line up. Each call recorded is one item of `printed`.
+    """
+    tables = [text for text in printed if text.startswith(header)]
+    if len(tables) != 1:
+        return [u"{0} calls start with the header".format(len(tables))]
+    rows = tables[0].split(u"\n")
+    problems = []
+    if len(rows) < 3:
+        problems.append(u"header without rows in its call")
+    if data_rows is not None and len(rows) - 2 != data_rows:
+        problems.append(u"{0} data rows, wanted {1}".format(
+            len(rows) - 2, data_rows))
+    columns = header.count(u"|")
+    for row in rows:
+        if row.count(u"|") != columns:
+            problems.append(u"not the header's column count: " + row)
+        if u"" in [cell.strip() for cell in row.split(u"|")[1:-1]]:
+            problems.append(u"empty cell: " + row)
+    # Any other call that is table lines but not a whole table: a row,
+    # or a header and rule, printed on its own.
+    strays = [text for text in printed
+              if text.lstrip().startswith(u"|") and not
+              (len(text.split(u"\n")) >= 3 and
+               set(text.split(u"\n")[1]) <= set(u"|-: "))]
+    if strays:
+        problems.append(u"table lines in calls of their own: {0}".format(
+            len(strays)))
+    return problems
+
+
 def safely(function, *args):
     """Call it, and turn a raise into a value that fails a check."""
     try:
@@ -610,6 +645,11 @@ class Recorder(object):
     def print_md(self, text):
         self.printed.append(text)
 
+    def lines(self):
+        """Every printed line, with a table printed whole split into
+        its rows."""
+        return u"\n".join(self.printed).split(u"\n")
+
     def text(self):
         return u"\n".join(self.alerts + self.questions + self.printed)
 
@@ -1087,16 +1127,22 @@ check("sag: a 65 mm sag is kept, not rolled back", made is not None,
 check("sag: committed", FakeTransaction.log == ["start", "commit"],
       FakeTransaction.log)
 check("sag: the report shows the worst gap as 65 mm",
-      u"| Height difference, worst | 65 mm |" in recorder.printed,
-      [line for line in recorder.printed if u"worst" in line])
+      u"| Height difference, worst | 65 mm |" in recorder.lines(),
+      [line for line in recorder.lines() if u"worst" in line])
+problems = table_problems(recorder.printed, u"| Run | Value |", 8)
+check("sag: the table goes out whole, one print_md, header's "
+      "column count", not problems, problems)
+problems = table_problems(recorder.printed, u"| Check | Value |", 6)
+check("sag, vertices: the table goes out whole, one print_md, header's "
+      "column count", not problems, problems)
 check("sag: every point is matched to a vertex",
       made is not None and u"| Points kept as vertices | {0} of {0} |".format(
-          len(made.given)) in recorder.printed)
+          len(made.given)) in recorder.lines())
 
 doc = FakeDocument()
 recorder = run_script(doc, Recorder(picks={u"level": u"DA11.E01"}))
 check("no sag: the worst gap is 0 mm",
-      u"| Height difference, worst | 0 mm |" in recorder.printed)
+      u"| Height difference, worst | 0 mm |" in recorder.lines())
 
 doc = FakeDocument(vertices_raise=True)
 recorder = run_script(doc, Recorder(picks={u"level": u"DA11.E01"}))

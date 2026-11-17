@@ -2226,6 +2226,15 @@ the library underneath was thoroughly covered.
 And the standing constraint: **this runs on IronPython 2.7.** No f-strings,
 no `open(encoding=)`, no `str()` on Revit data, nothing needing Python 3.
 
+**A markdown table goes out in one `print_md` call.** pyRevit renders each
+call as a document of its own, so a table printed a line at a time comes
+out as one table per row and the columns do not line up (found in Pipe
+Openings, fixed in Close Link Datums, Datums to Workset, ImportSchedule,
+Flip Status, Place at Coordinate and Point Cloud to Toposolid in 2.47.2).
+Cells go through `table_cell`, which turns `|` and line breaks into
+something harmless and an empty cell into `-`; each harness checks the
+table arrives whole with the header's column count (`table_problems`).
+
 ## Reaching the active document
 
 `resolve_host()` tries, in order: `pyrevit.revit`, `pyrevit.HOST_APP`, then
