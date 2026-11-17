@@ -2,5 +2,6 @@ layout:
   - Place at Coordinate
   - Pipe Openings
   - Update Openings
+  - Split Wall Layers
   - Point Cloud to Toposolid
   - Remove Level

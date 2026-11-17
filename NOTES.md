@@ -2371,6 +2371,72 @@ The extensible storage calls in `avh_openings.storage`, including
 IronPython's `entity.Set[String]` generic call, and `Document.Delete`
 and `GetElement` by UniqueId, are from the API documentation only.
 
+## Split Wall Layers (2.49.0)
+
+Built without access to Revit: the MCP bridge was not paired, so
+nothing in it has been measured against a real wall yet.
+
+**Where a layer goes is arithmetic, kept out of Revit.** A wall's curve
+is its location line, which can be any of six places across the wall
+(`WALL_KEY_REF_PARAM`, the `WallLocationLine` enumeration). Each new
+wall goes at `layer centre - location line offset` along
+`Wall.Orientation`, both measured from the wall centre with the
+exterior positive. `avh_walllayers.model` does this and is tested
+directly, including an asymmetric wall located by its core face.
+
+**The copy, then everything set explicitly.** Each new wall is
+`CopyElement` of the original, so it keeps the parameters nobody wants
+to list one by one. It is then given its type, then its location line
+(centreline), then its curve, in that order. In Revit, changing a
+wall's type keeps the location line where it is, and changing the
+location line keeps the faces where they are and moves the curve; the
+harness's fake does both. Setting the curve last makes the result
+independent of either side effect. Setting it before the location line
+puts the wall a location line offset out, which the harness catches
+(mutation: key set after the curve, 2 checks fail).
+
+**The harness checks faces, not the script's numbers.** The fake works
+out each wall's faces from its own curve, location line and layers,
+with code of its own, and the main check is that the new walls tile
+the original's layers exactly. A check that compared the new curves
+with `model.shifts` would only be the script agreeing with itself.
+
+**Doors and windows are refused, not moved.** Which layer a door
+belongs to, and what the other layers need where it was, is a design
+decision. Splitting such a wall by hand is the honest answer until
+someone decides.
+
+**The first Revit run (2.49.0 -> 2.49.1).** A plain partition was
+refused: "its layers change up its height". 2.49.0 asked
+`CompoundStructure.IsVerticallyCompound`, which says how the structure
+is stored, and was True for that wall. The question meant is
+`IsVerticallyHomogeneous()`, true when each layer is one region from
+bottom to top. The fake now says IsVerticallyCompound True for every
+structure, as Revit did, and putting the 2.49.0 check back fails 38
+checks. The refusal now quotes the value it acted on, so if this is
+still wrong the next report names it. The run also printed a table
+with a header and no rows, since every wall was refused; that table is
+now left out.
+
+**Dependents are found by deleting and rolling back**, with their
+categories read *after* the rollback: a deleted element cannot be
+looked at inside the transaction that deleted it.
+
+Mutations, each failing the suite: no location offset (3), the curve
+on the wrong side (6), key set after the curve (2), assimilate status
+ignored (1), a refused wall's commit ignored (3), no check after the
+run (2), an original still in the model not flagged (1), inserts not
+refused (4), membranes made into walls (2), core faces off by one (5),
+existing types ignored (3), a new type's width not read back (1).
+
+Unverified, to look at on the first run: `CopyElement` on a wall,
+`ChangeTypeId`, `WALL_KEY_REF_PARAM.Set`, `LocationCurve.Curve`,
+`WallType.Duplicate`, `CreateSingleLayerCompoundStructure` for a
+finish or insulation layer, `Wall.FindInserts`, `Wall.Orientation` on
+a flipped wall, and how the new walls join their neighbours once the
+original is gone. Every new wall keeps the original's structural flag,
+gypsum included.
+
 ## Update AVH: measured, not trusted
 
 The button reuses pyRevit's own updater (`updater.update_repo`, which is

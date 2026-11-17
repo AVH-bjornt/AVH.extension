@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.48.1.** The authoritative number is `__version__` in
+**Version 2.49.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -257,6 +257,24 @@ leaves the old one where it was, and the whole run is one undo.
 Openings made before 2.48.0, or by hand, carry no tag: they are
 counted in the report and not touched. A pipe in a linked model is only
 seen in its new place once the link has been reloaded.
+
+**Split Wall Layers.** Select walls and each is split into one wall per
+layer of its structure: 12.5 mm gypsum / 95 mm timber / 12.5 mm gypsum
+becomes three walls, side by side exactly where the layers were. Each
+new wall gets a one layer type named after its material and thickness
+("Gipsplata 12.5 mm"), reused if the model already has one with the
+same thickness, material and function, made by duplicating the wall's
+type if not. The new walls are copies of the original, so they keep
+its levels, constraints, height, phase and workset; the original is
+then deleted.
+
+Curtain and stacked walls, curved walls, walls with doors, windows or
+openings in them, walls in groups, pinned walls and walls with layers
+that change up their height are listed with the reason and left alone.
+Membrane layers are not made into walls. The list, and anything else
+deleting the originals would take with them (dimensions, tags), is
+shown before anything changes; a wall Revit refuses is left whole, and
+the whole run is one undo.
 
 **Point Cloud to Toposolid.** Pick a linked point cloud, a point
 spacing in metres, a toposolid type and a level. The cloud is read in
@@ -594,7 +612,9 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.47.3 | Report tables printed whole in one go so their columns line up: Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid | Not yet run in Revit |
 | 2.47.4 | Pipe Openings: a floor or roof that refuses a vertical cut at every sketch height gets a shaft opening kept to its own thickness; every report column left aligned, in Pipe Openings and in Stair Ratio, Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid, Align Views, Batch Sheets and Rename Views | Ran in Revit 2025: the sloped roof's opening was made |
 | 2.48.0 | Pipe Openings tags every opening with its pipe, host and settings; Model panel: Update Openings re-cuts openings whose pipe moved or changed size and lists those whose pipe is gone | Ran in Revit 2025: tags read back and two moved pipes found (1077 and 631 mm); the report crashed after the re-cut, asking a deleted opening for its Id |
-| 2.48.1 | Update Openings: each opening's Id kept from before it is deleted, so the report after a re-cut no longer crashes | Worked in Revit 2025, current |
+| 2.48.1 | Update Openings: each opening's Id kept from before it is deleted, so the report after a re-cut no longer crashes | Worked in Revit 2025 |
+| 2.49.0 | Model panel: Split Wall Layers, one wall per layer of each selected wall's structure, each with a one layer type | Ran in Revit: a plain wall refused as "its layers change up its height", under an empty table |
+| 2.49.1 | Split Wall Layers: layers that change up a wall found with `IsVerticallyHomogeneous()`, not `IsVerticallyCompound`; the refusal names what Revit said; no empty table when every wall is refused | Worked in Revit, current |
 
 ## Licence
 
