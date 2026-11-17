@@ -100,6 +100,15 @@ class Row(object):
         self.reason = reason          # why it will not be made, or u""
         self.done = False
         self.result = u""
+        self.warning = u""            # made, but worth a look
+
+
+# Shown on a floor or roof row whose face normals could not be read, so
+# the size assumed flat faces. That is exact for a flat slab and too
+# small for a pipe leaning with a sloped roof, and nothing else in the
+# report would show the difference.
+FLAT_WARNING = u"face slope not read, sized as if flat: check it if " \
+               u"the host slopes"
 
 
 # --------------------------------------------------------------------------
@@ -167,16 +176,22 @@ def selected_hosts(doc, uidoc):
 def plan(hosts, pipes, settings, round_symbol_ok):
     rows = []
     for host in hosts:
-        for pipe, entry, exit in reader.crossings(DB, host, pipes):
+        found = reader.crossings(DB, host, pipes)
+        for pipe, entry, exit, entry_normal, exit_normal in found:
             opening, reason = model.size_opening(
-                entry, exit, pipe.diameter, host.frame, settings)
+                entry, exit, pipe.diameter, host.frame, settings,
+                entry_normal, exit_normal)
             if opening is not None and host.kind == model.WALL and \
                     settings.shape == model.CIRCULAR and \
                     not round_symbol_ok:
                 reason = u"needs the {0} family, which is not in this " \
                          u"model or the extension".format(FAMILY_NAME)
                 opening = None
-            rows.append(Row(host, pipe, entry, exit, opening, reason))
+            row = Row(host, pipe, entry, exit, opening, reason)
+            if opening is not None and host.kind != model.WALL and \
+                    (entry_normal is None or exit_normal is None):
+                row.warning = FLAT_WARNING
+            rows.append(row)
     return rows
 
 
@@ -294,11 +309,16 @@ def point(values):
     return DB.XYZ(values[0], values[1], values[2])
 
 
-def profile(opening):
-    """A CurveArray for a floor or roof opening."""
+def at_height(values, z):
+    return (values[0], values[1], values[2] if z is None else z)
+
+
+def profile(opening, z=None):
+    """A CurveArray for a floor or roof opening, drawn at height z (the
+    opening's own centre when None)."""
     curves = DB.CurveArray()
     if opening.shape == model.CIRCULAR:
-        center = point(opening.center)
+        center = point(at_height(opening.center, z))
         radius = opening.diameter / 2.0
         curves.Append(DB.Arc.Create(center, radius, 0.0, math.pi,
                                     DB.XYZ.BasisX, DB.XYZ.BasisY))
@@ -306,11 +326,62 @@ def profile(opening):
                                     2.0 * math.pi, DB.XYZ.BasisX,
                                     DB.XYZ.BasisY))
         return curves
-    corners = opening.corners()
+    corners = [at_height(corner, z) for corner in opening.corners()]
     for index in range(4):
         curves.Append(DB.Line.CreateBound(
             point(corners[index]), point(corners[(index + 1) % 4])))
     return curves
+
+
+# The offset of a floor or roof above its level, by class of host.
+LEVEL_OFFSETS = {model.FLOOR: "FLOOR_HEIGHTABOVELEVEL_PARAM",
+                 model.ROOF: "ROOF_LEVEL_OFFSET_PARAM"}
+
+
+def sketch_heights(doc, row):
+    """[(label, z)] heights to draw a floor or roof opening's sketch at,
+    in the order they are tried. [(u"", None)] for a wall.
+
+    The first Revit run (2.47.1, Revit 2025) refused a roof opening
+    drawn at the middle of the roof with "Can't change plane of Opening
+    Cut Sketch". Which plane Revit does want is not documented, so it
+    is not guessed: each likely one is tried in a transaction of its
+    own and the first Revit keeps is used, and the report says which.
+    A vertical cut goes through the whole host whatever height its
+    sketch is drawn at, so the height changes nothing about the hole.
+    """
+    host = row.host
+    if host.kind == model.WALL:
+        return [(u"", None)]
+    found = []
+    try:
+        level = doc.GetElement(host.element.LevelId)
+        elevation = level.Elevation
+    except BaseException as exc:
+        logger.debug(to_text(exc))
+        level = None
+        elevation = None
+    if elevation is not None:
+        offset = None
+        member = getattr(DB.BuiltInParameter,
+                         LEVEL_OFFSETS.get(host.kind, ""), None)
+        if member is not None:
+            try:
+                parameter = host.element.get_Parameter(member)
+                if parameter is not None and parameter.HasValue:
+                    offset = parameter.AsDouble()
+            except BaseException as exc:
+                logger.debug(to_text(exc))
+        if offset:
+            found.append((u"its level and offset", elevation + offset))
+        found.append((u"its level", elevation))
+    found.append((u"the middle of the host", row.opening.center[2]))
+    found.append((u"the project's zero", 0.0))
+    unique = []
+    for label, z in found:
+        if all(abs(z - other) > 1e-4 for _, other in unique):
+            unique.append((label, z))
+    return unique
 
 
 def place_round(doc, row, symbol):
@@ -350,8 +421,9 @@ def place_round(doc, row, symbol):
     return instance
 
 
-def make(doc, row, symbol):
-    """Make one opening. Returns the new element."""
+def make(doc, row, symbol, z=None):
+    """Make one opening, a floor or roof's sketched at height z. Returns
+    the new element."""
     host = row.host
     opening = row.opening
     if host.kind == model.WALL:
@@ -360,7 +432,25 @@ def make(doc, row, symbol):
         corners = opening.corners()
         return doc.Create.NewOpening(host.element, point(corners[0]),
                                      point(corners[2]))
-    return doc.Create.NewOpening(host.element, profile(opening), False)
+    return doc.Create.NewOpening(host.element, profile(opening, z), False)
+
+
+def attempt(doc, row, symbol, z):
+    """One try at one opening in its own transaction. Returns the
+    reason it failed, or u"" when Revit kept it."""
+    transaction = DB.Transaction(doc, TITLE)
+    transaction.Start()
+    failures = collect_failures(transaction)
+    try:
+        element = make(doc, row, symbol, z)
+        if element is None:
+            raise Exception(u"Revit made nothing")
+    except BaseException as exc:
+        transaction.RollBack()
+        return to_text(exc) or u"Revit refused it"
+    if not commit_checked(transaction):
+        return u"; ".join(failures.errors) or u"Revit rolled it back"
+    return u""
 
 
 def make_all(doc, rows, symbol):
@@ -372,24 +462,29 @@ def make_all(doc, rows, symbol):
         for row in rows:
             if row.opening is None:
                 continue
-            transaction = DB.Transaction(doc, TITLE)
-            transaction.Start()
-            failures = collect_failures(transaction)
-            try:
-                element = make(doc, row, symbol)
-                if element is None:
-                    raise Exception(u"Revit made nothing")
-            except BaseException as exc:
-                transaction.RollBack()
-                row.result = u"not made: {0}".format(to_text(exc))
-                continue
-            if not commit_checked(transaction):
-                why = u"; ".join(failures.errors) or u"Revit rolled it back"
-                row.result = u"not made: {0}".format(why)
-                continue
-            row.done = True
-            row.result = u"made"
-            made += 1
+            heights = sketch_heights(doc, row)
+            reasons = []
+            for index, (label, z) in enumerate(heights):
+                why = attempt(doc, row, symbol, z)
+                if not why:
+                    row.done = True
+                    row.result = u"made"
+                    if index > 0:
+                        row.result = u"made, sketched at {0}".format(label)
+                    made += 1
+                    break
+                if why not in reasons:
+                    reasons.append(why)
+            if not row.done:
+                # Say what was tried: a refusal at one height and at
+                # four read the same otherwise, and so does a run of an
+                # older version that tried only one.
+                tried = u""
+                if len(heights) > 1:
+                    tried = u" (sketch tried at {0})".format(u", ".join(
+                        label for label, _ in heights))
+                row.result = u"not made{0}: {1}".format(
+                    tried, u"; ".join(reasons))
     except BaseException:
         group.RollBack()
         raise
@@ -450,23 +545,46 @@ def host_text(host):
     return u"{0} {1}".format(HOST_WORDS[host.kind], link(host.element.Id))
 
 
+def table_cell(text):
+    """Text that cannot break the table: a pipe character would start a
+    new column, and a line break a new row."""
+    return to_text(text).replace(u"|", u"/").replace(u"\n", u" ")
+
+
 def print_rows(rows, settings, after):
-    output.print_md(u"### {0}".format(TITLE))
-    output.print_md(u"_{0}_".format(settings.describe()))
-    output.print_md(u"| Host | Pipe | Pipe \u00f8 | Opening | Off square "
-                    u"| {0} |".format(u"Result" if after else u"Note"))
-    output.print_md(u"| --- | --- | ---: | ---: | ---: | --- |")
+    """The table, built whole and printed in one print_md.
+
+    pyRevit renders each print_md call as a document of its own, so a
+    table printed a line at a time comes out as a header table and then
+    one separate table per row, each sizing its columns to its own
+    contents, and nothing lines up. Seen in Revit at 2.47.0.
+    """
+    lines = [
+        u"| Host | Pipe | Pipe \u00f8 mm | Opening mm | Off square | {0} |"
+        .format(u"Result" if after else u"What happens"),
+        u"| :--- | :--- | ---: | ---: | ---: | :--- |",
+    ]
     for row in rows:
-        size = row.opening.size_text() if row.opening else u""
-        skew = u"{0}\u00b0".format(int(round(row.opening.skew))) \
-            if row.opening else u""
-        note = u"skipped: " + row.reason if row.reason else u""
+        size = row.opening.size_text() if row.opening else u"-"
+        skew = u"-"
+        if row.opening:
+            skew = u"{0}\u00b0".format(int(round(row.opening.skew)))
         if after and row.result:
             note = row.result
-        output.print_md(u"| {0} | {1} | {2} | {3} | {4} | {5} |".format(
+        elif row.reason:
+            note = u"skipped: " + row.reason
+        else:
+            note = u"will be cut"
+        if row.warning:
+            note = u"{0}; {1}".format(note, row.warning)
+        lines.append(u"| {0} | {1} | {2} | {3} | {4} | {5} |".format(
             host_text(row.host), pipe_text(row.pipe),
             model.format_number(row.pipe.diameter * model.MM_PER_FOOT),
-            size, skew, note))
+            size, skew, table_cell(note)))
+    heading = u"{0}: result" if after else u"{0}: found"
+    output.print_md(u"### {0}".format(heading.format(TITLE)))
+    output.print_md(u"_{0}_".format(settings.describe()))
+    output.print_md(u"\n".join(lines))
 
 
 def hosts_line(hosts):

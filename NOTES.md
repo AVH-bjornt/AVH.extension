@@ -2112,7 +2112,7 @@ Not done: clearance (near miss) tests, clash status that survives
 closing the window, a report to Excel, and view visibility for linked
 elements (a link is tested whole unless the view has a section box).
 
-## Pipe Openings (2.47.0)
+## Pipe Openings (2.47.0 to 2.47.2)
 
 Select walls, floors or roofs; a window asks for the shape and the
 clearance; every pipe and conduit through them gets an opening.
@@ -2140,14 +2140,37 @@ caught by the layered wall scenario in the harness.
 
 ### The size of a hole for a pipe at an angle
 
-The opening is the face ellipse swept along the axis through the slab.
-In a direction w in the face it reaches r * sqrt(1 + ((d.w)/(d.n))^2)
-past the projected axis end points; a circle needs half the projected
-axis plus r / |d.n|. `test_openings_model.py` does not trust that
-formula: it samples points over the real pipe surface inside the real
-slab at five angles and checks every one lands inside, and that the
-rectangle is within 2 mm of the tightest that fits. Past 75 degrees off
-square the crossing is skipped.
+The pipe inside the host is the convex hull of its cut ellipses at the
+two faces, so the opening covers both ellipses, seen along the cut,
+and everything between them (`model.size_opening`). The arithmetic
+needs each face's own normal, read from Revit with `Face.Project` and
+`Face.ComputeNormal` at the points where the axis leaves the solid.
+
+2.47.0 used the cut direction as the face normal everywhere. That is
+exact for walls and flat slabs, where the faces are square to the cut,
+and wrong for a sloped roof, which is cut vertically through faces
+that lean. For a 160 mm pipe 30 degrees off vertical through a 300 mm
+roof it was 46 mm short a side when the pipe leaned with a 30 degree
+slope, 126 mm short at 45, and oversized the other way. Vertical vents,
+the common case, were right. Fixed in 2.47.1.
+
+`test_openings_model.py` does not trust the formula: it samples the
+real pipe surface inside the real slab, faces sloped or not, and checks
+every point lands inside the opening and the rectangle is within 2 mm
+of the tightest that fits, at five wall and floor angles and seven roof
+slope and lean combinations. The sampling covers only the stretch of
+axis whose surface can be inside the slab. A fixed range spread the
+samples too thin to find the tip of a long ellipse and read 4 mm short
+at 75 degrees through a 45 degree roof, where sampling 70 times finer
+put the formula within 0.1 mm.
+
+Where a face cannot be read, the size falls back to the cut direction,
+which is what 2.47.0 did, and the row in the report says so, because on
+a sloped roof that is too small and nothing else would show it.
+
+The 75 degree limit is measured against the face, not the cut: a vent
+square to a 30 degree roof reports 30 degrees off square. A face within
+5 degrees of parallel to the cut is refused.
 
 ### Circular wall openings need a family
 
@@ -2162,20 +2185,65 @@ with that reason and the rest of the run goes ahead.
 
 ### What the mutations proved
 
-Twelve mutations, each caught: the angle ignored in the rectangle (7
-checks fail) or the circle (5), rounding down (2), no skew limit (4),
-insulation ignored (1), link transform ignored (1), commit status
-ignored (1), no check after (2), no move back for a misplaced family
-(4), group assimilate status ignored (1), no regenerate before reading
-a new instance's position (5), segments not joined (2, after adding the
-layered wall; it survived until then).
+Twenty mutations, each caught (failing checks in brackets). Added at
+2.47.2: no second sketch height (9), the same height tried twice (1),
+the level offset ignored (6), the sketch height ignored (7). From
+2.47.1: the face
+lean ignored (22), the circle sized on the ellipse's short axis (9),
+only the entry ellipse used (4), rounding down (8), no skew limit (4),
+face normals ignored (2), the normal taken from the last face seen
+rather than the nearest (45), no flat warning (1), the table printed a
+line at a time (3), insulation ignored (1), link transform ignored (1),
+commit status ignored (1), no check after (2), no move back for a
+misplaced family (4), group assimilate status ignored (1), segments not
+joined (2).
+
+Two needed the harness made more like Revit before they were caught.
+Segments not joined survived until a wall came back as one solid per
+layer. The wrong face survived until the fake slab had its four edge
+faces, whose normals are horizontal; with only top and bottom, which
+share a normal, any face was the right one.
+
+### Where a floor or roof opening's sketch goes (2.47.2)
+
+`NewOpening(host, profile, False)` takes the outline as curves, and
+2.47.0 and 2.47.1 drew them at the middle of the host's thickness. In
+Revit 2025 a roof refused that at commit: "Can't change plane of
+Opening Cut Sketch." The cut is vertical through the whole host, so the
+height of the outline changes nothing about the hole, but Revit wants
+the sketch on its own plane and the API documentation does not say
+which.
+
+So it is asked rather than guessed: `sketch_heights` lists the host's
+level plus its offset (`ROOF_LEVEL_OFFSET_PARAM` or
+`FLOOR_HEIGHTABOVELEVEL_PARAM`), its level, its middle and zero, with
+duplicates removed, and `attempt` tries each in a transaction of its
+own until one commits. The report says "made, sketched at ..." when the
+first was not the one, so the next live run shows which plane Revit
+wanted. Once that is known, the list can be cut to it. The refusals
+from the failed tries are reported once each if none is kept.
+
+The harness roof refuses every height but one, either by raising from
+`NewOpening` or as a failure at commit, since which of the two Revit
+did is not known from the dialog text alone.
+
+### The output table is printed in one call
+
+The first Revit run showed the report's columns out of line. pyRevit
+renders each `print_md` call as a document of its own, and the table
+was printed a line at a time, so the header was one table and each row
+another, every one sizing its own columns. It is now built whole and
+printed once, cells escaped for `|` and line breaks, and no cell left
+empty. The harness checks the header and rows arrive in one call with
+six columns each. Other buttons still print tables a line at a time.
 
 ### Unverified
 
 Everything crossing into Revit, read from the API documentation only:
 `Solid.IntersectWithCurve`, `NewOpening` in both forms, `Arc.Create`,
 `NewFamilyInstance` on a wall host, `TransactionGroup.Assimilate`, the
-MEP diameter and insulation parameters, and the WPF settings window.
+MEP diameter and insulation parameters, `Face.Project` and
+`Face.ComputeNormal`, and the WPF settings window.
 
 ## Update AVH: measured, not trusted
 

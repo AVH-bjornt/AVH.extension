@@ -196,25 +196,35 @@ def perpendiculars(direction):
     return first, second
 
 
-def pipe_points_in_slab(entry, exit, radius, frame):
+def pipe_points_in_slab(entry, exit, radius, frame, face=None):
     """Points on the pipe's surface lying inside the slab, which is the
-    region between the planes through entry and exit square to n."""
+    region between the planes through entry and exit square to `face`,
+    the faces' normal (frame.n when not given). A sloped roof cut
+    vertically has faces that are not square to frame.n."""
+    m = model.unit(face) if face is not None else frame.n
     direction = model.unit(model.sub(exit, entry))
     first, second = perpendiculars(direction)
-    low = model.dot(entry, frame.n)
-    high = model.dot(exit, frame.n)
+    low = model.dot(entry, m)
+    high = model.dot(exit, m)
     low, high = min(low, high), max(low, high)
-    axis_length = model.length(model.sub(exit, entry))
+    # Only the stretch of axis whose surface can be inside the slab is
+    # sampled, finely: a pipe at a steep angle to a sloped face reaches
+    # far past where its axis does, and a fixed range spread its samples
+    # too thin to find the tip of the cut.
+    along = model.dot(direction, m)
+    start = model.dot(entry, m)
+    ends = [(low - start - radius) / along, (high - start + radius) / along]
+    first_t, last_t = min(ends), max(ends)
     found = []
-    for i in range(-60, 161):
-        t = axis_length * i / 100.0
+    for i in range(401):
+        t = first_t + (last_t - first_t) * i / 400.0
         base = model.add(entry, model.scale(direction, t))
-        for k in range(72):
-            angle = 2.0 * math.pi * k / 72.0
+        for k in range(180):
+            angle = 2.0 * math.pi * k / 180.0
             offset = model.add(model.scale(first, radius * math.cos(angle)),
                                model.scale(second, radius * math.sin(angle)))
             p = model.add(base, offset)
-            depth = model.dot(p, frame.n)
+            depth = model.dot(p, m)
             if low - 1e-9 <= depth <= high + 1e-9:
                 found.append(p)
     return found
@@ -248,26 +258,50 @@ def tight(opening, points, frame):
             opening.height / 2.0 - need_v < 2 * MM)
 
 
+def roof_case(slope, tilt, heading, thickness=300 * MM):
+    """A pipe through a roof sloping `slope` degrees down towards -x,
+    leaning `tilt` degrees from vertical towards `heading` degrees in
+    plan (0 is +x, up the slope). Returns (entry, exit, face normal)."""
+    s = math.tan(math.radians(slope))
+    m = model.unit((-s, 0.0, 1.0))
+    t = math.radians(tilt)
+    h = math.radians(heading)
+    d = (math.sin(t) * math.cos(h), math.sin(t) * math.sin(h), math.cos(t))
+    # the faces are m.p = 0 and m.p = thickness
+    k = thickness / model.dot(d, m)
+    return (0.0, 0.0, 0.0), model.scale(d, k), m
+
+
 cases = [
     (u"wall, 30 degrees in plan", wall, (3.0, 0.0, 4.0),
-     (3.0 + math.tan(math.radians(30)) * 1.0, 1.0, 4.0)),
+     (3.0 + math.tan(math.radians(30)) * 1.0, 1.0, 4.0), None),
     (u"wall, 45 degrees falling", wall, (3.0, 0.0, 4.0),
-     (3.0, 1.0, 3.0)),
+     (3.0, 1.0, 3.0), None),
     (u"wall, compound 20 and 35", wall, (3.0, 0.0, 4.0),
      (3.0 + math.tan(math.radians(20)), 1.0,
-      4.0 - math.tan(math.radians(35)))),
+      4.0 - math.tan(math.radians(35))), None),
     (u"floor, 40 degrees off vertical", floor, (0.0, 0.0, 0.0),
-     (math.tan(math.radians(40)) * 0.8, 0.0, 0.8)),
+     (math.tan(math.radians(40)) * 0.8, 0.0, 0.8), None),
     (u"floor, 60 degrees diagonal", floor, (0.0, 0.0, 0.0),
      (math.tan(math.radians(60)) * 0.5 / math.sqrt(2),
-      math.tan(math.radians(60)) * 0.5 / math.sqrt(2), 0.5)),
+      math.tan(math.radians(60)) * 0.5 / math.sqrt(2), 0.5), None),
 ]
-for label, frame, entry, exit in cases:
+# Sloped roofs, cut vertically. The two leaning with the slope were 46
+# and 126 mm short a side at 2.47.0, which sized every host as if its
+# faces were square to the cut.
+for slope, tilt, heading in ((30, 0, 0), (30, 30, 0), (30, 30, 180),
+                             (45, 30, 0), (45, 30, 180), (30, 25, 90),
+                             (35, 20, 45)):
+    entry, exit, m = roof_case(slope, tilt, heading)
+    cases.append((u"roof {0}, pipe {1} towards {2}".format(
+        slope, tilt, heading), floor, entry, exit, m))
+
+for label, frame, entry, exit, face in cases:
     for shape in model.SHAPES:
         opening, reason = model.size_opening(
             entry, exit, 160 * MM, frame,
-            settings(shape=shape, amount=0, round_to=0))
-        points = pipe_points_in_slab(entry, exit, 80 * MM, frame)
+            settings(shape=shape, amount=0, round_to=0), face, face)
+        points = pipe_points_in_slab(entry, exit, 80 * MM, frame, face)
         ok, worst = fits(opening, points, frame) if opening else (False, 0)
         check(u"fits: {0}, {1}".format(label, shape), ok,
               u"{0:.3f} mm outside".format(worst * model.MM_PER_FOOT))

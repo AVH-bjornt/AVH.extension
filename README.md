@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.47.0.** The authoritative number is `__version__` in
+**Version 2.47.2.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -201,7 +201,8 @@ included. The last settings are remembered.
 Every pipe and conduit whose centre line passes through a selected
 element is found, sized from its outer diameter with insulation, and
 listed in the output window before anything is cut. A pipe crossing at
-an angle gets a larger hole, worked out so it still fits. One more than
+an angle gets a larger hole, worked out so it still fits, including
+through a sloped roof, where the roof's own slope is taken into account. One more than
 75 degrees off square is listed and skipped. A pipe that already has an
 opening runs through the hole and is not counted again, so running it
 twice does not cut twice.
@@ -218,6 +219,13 @@ instance parameter `AVH_Diameter`, loaded in the model or saved as
 `assets/AVH_Round_Opening.rfa`. It is not in the repository yet; until
 it is, round openings in walls are listed as skipped and floors and
 roofs are still cut. Curved walls and curtain walls are refused.
+
+A floor or roof opening is cut vertically from an outline Revit wants
+drawn on a particular plane, which it does not document. The tool tries
+the host's level and offset first, then its level, its middle and the
+project's zero, each in a step of its own, and keeps the first Revit
+accepts. The hole is the same whichever, and the report names the
+plane when it was not the first.
 
 **Point Cloud to Toposolid.** Pick a linked point cloud, a point
 spacing in metres, a toposolid type and a level. The cloud is read in
@@ -549,7 +557,9 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.44.3 | Clash Detector: each new window reloads its modules from disk | Not yet run in Revit |
 | 2.45.0 | Clash Detector setup: model A and model B, one category list with A and B buttons under discipline headings, presets, tolerance beside Run | Not yet run in Revit |
 | 2.46.0 | Clash Detector: clearance zones round pipes, soft clashes in violet; a pipe never clashes with its own fittings or insulation | Not yet run in Revit |
-| 2.47.0 | Model panel: Pipe Openings, rectangular or circular openings round pipes and conduits through selected walls, floors and roofs | Not yet run in Revit, current |
+| 2.47.0 | Model panel: Pipe Openings, rectangular or circular openings round pipes and conduits through selected walls, floors and roofs | Ran in Revit: a wall opening made; the report table's columns out of line |
+| 2.47.1 | Pipe Openings: sloped roofs and floors sized from their real face slope; report table printed whole so its columns line up | Ran in Revit 2025: the table lined up; a roof opening refused with "Can't change plane of Opening Cut Sketch" |
+| 2.47.2 | Pipe Openings: a floor or roof opening's sketch tried at the host's level and offset, its level, its middle and zero, and kept where Revit accepts it; a refusal names every height tried | Ran in Revit 2025: the roof still refused with the same message, and that version's report could not show whether every height was tried, current |
 
 ## Licence
 

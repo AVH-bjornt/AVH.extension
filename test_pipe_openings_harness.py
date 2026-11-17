@@ -149,20 +149,66 @@ def intersect(a, b):
     return (low, high) if high > low else None
 
 
+class UV(object):
+    def __init__(self, u, v):
+        self.U = u
+        self.V = v
+
+
+class ProjectResult(object):
+    def __init__(self, distance, uv):
+        self.Distance = distance
+        self.UVPoint = uv
+
+
+class Face(object):
+    """One of a slab's six faces: the plane where local coordinate
+    `axis` (0 u, 1 v, 2 n) equals `value`. The four edges matter: the
+    reader has to pick the face the axis actually crossed, and an edge's
+    normal is horizontal."""
+
+    def __init__(self, solid, axis, value):
+        self.solid = solid
+        self.axis = axis
+        self.value = value
+
+    def Project(self, point):
+        local = self.solid.frame.local(point.t())
+        others = [local[i] for i in range(3) if i != self.axis]
+        return ProjectResult(abs(local[self.axis] - self.value),
+                             UV(others[0], others[1]))
+
+    def ComputeNormal(self, uv):
+        f = self.solid.frame
+        return XYZ(*(f.u, f.v, f.n)[self.axis])
+
+
 class Solid(object):
-    """A slab: a box in a frame (u, v, n), with holes cut along n.
+    """A slab: a box in a frame (u, v, n), with holes cut along `cut`'s n.
 
     `holes` are ("rect", cu, cv, half_u, half_v) or ("circle", cu, cv, r)
-    in the slab's own (u, v). For a floor the frame is plan; for a wall it
-    is the wall's own, so a wall's rectangle hole is in wall coordinates.
+    in the cut frame's (u, v). The cut frame is the slab's own unless
+    given: a sloped roof is a box in its own tilted frame but is cut
+    vertically, so its holes are prisms in plan.
     """
 
-    def __init__(self, frame, low, high):
+    def __init__(self, frame, low, high, cut=None):
         self.frame = frame
+        self.cut = cut or frame
         self.low = low
         self.high = high
         self.holes = []
         self.Volume = 1.0
+        self.faces_unreadable = False
+
+    @property
+    def Faces(self):
+        if self.faces_unreadable:
+            raise Exception("no faces here")
+        # The big faces first, so a reader that takes the last face it
+        # sees rather than the nearest gets an edge.
+        return [Face(self, axis, value) for axis in (2, 0, 1)
+                for value in (self.low[axis], self.high[axis])]
 
     def IntersectWithCurve(self, line, options):
         f = self.frame
@@ -176,8 +222,10 @@ class Solid(object):
         if span is None:
             return IntersectResult([])
         pieces = [span]
+        ca = self.cut.local(line.a.t())
+        cd = model.sub(self.cut.local(line.b.t()), ca)
         for hole in self.holes:
-            inside = self._inside(hole, a, d)
+            inside = self._inside(hole, ca, cd)
             if inside is None:
                 continue
             cut = []
@@ -269,6 +317,16 @@ class Host(Element):
     def __init__(self, frame, low, high):
         Element.__init__(self)
         self.solid = Solid(frame, low, high)
+        self.params = {}
+        # Where Revit insists a vertical opening's sketch lies, and how
+        # it says no: "raise" from NewOpening, or "failure" at commit.
+        # None takes a sketch at any height. Seen in Revit 2025 on a
+        # roof: "Can't change plane of Opening Cut Sketch."
+        self.sketch_z = None
+        self.sketch_refusal = "raise"
+
+    def get_Parameter(self, name):
+        return self.params.get(name)
 
     def get_Geometry(self, options):
         return [self.solid]
@@ -342,6 +400,21 @@ class RoofBase(Host):
         Host.__init__(self, model.slab_frame(), low, high)
 
 
+class SlopedRoof(RoofBase):
+    """A roof `thickness` thick rising `slope` degrees towards +x, its
+    underside through the origin, cut vertically like any roof."""
+
+    def __init__(self, slope, thickness, extent=20.0):
+        RoofBase.__init__(self, (0, 0, 0), (1, 1, 1))
+        angle = math.radians(slope)
+        frame = model.Frame((math.cos(angle), 0.0, math.sin(angle)),
+                            (0.0, 1.0, 0.0),
+                            (-math.sin(angle), 0.0, math.cos(angle)))
+        self.solid = Solid(frame, (-extent, -extent, 0.0),
+                           (extent, extent, thickness),
+                           cut=model.slab_frame())
+
+
 class Parameter(object):
     def __init__(self, value):
         self.value = value
@@ -360,6 +433,14 @@ class BuiltInParameter(object):
     RBS_PIPE_OUTER_DIAMETER = "pipe_od"
     RBS_CONDUIT_OUTER_DIAM_PARAM = "conduit_od"
     RBS_REFERENCE_INSULATION_THICKNESS = "insulation"
+    ROOF_LEVEL_OFFSET_PARAM = "roof_offset"
+    FLOOR_HEIGHTABOVELEVEL_PARAM = "floor_offset"
+
+
+class Level(Element):
+    def __init__(self, elevation):
+        Element.__init__(self)
+        self.Elevation = elevation
 
 
 class BuiltInCategory(object):
@@ -459,10 +540,19 @@ class Create(object):
         doc.calls.append(("NewOpening", host, a, b, perpendicular))
         if host in doc.refuse_hosts:
             doc.pending_errors.append(u"Can't cut instance out of element")
-        f = host.solid.frame
+        f = host.solid.cut
         if isinstance(a, CurveArray):
             if perpendicular is not False:
                 raise Exception("expected a vertical cut")
+            heights = [c.center.Z if isinstance(c, Arc) else c.a.Z
+                       for c in a.items]
+            doc.sketch_heights.append(heights[0])
+            if host.sketch_z is not None and \
+                    any(abs(z - host.sketch_z) > 1e-9 for z in heights):
+                message = u"Can't change plane of Opening Cut Sketch."
+                if host.sketch_refusal == "raise":
+                    raise Exception(message)
+                doc.pending_errors.append(message)
             arcs = [c for c in a.items if isinstance(c, Arc)]
             if arcs:
                 u, v, _ = f.local(arcs[0].center.t())
@@ -513,6 +603,8 @@ class Document(object):
         self.pending_errors = []
         self.instances = []
         self.refuse_hosts = set()
+        self.levels = []
+        self.sketch_heights = []
         self.misplace = False
         self.place_off_by = None
         self.transactions = []
@@ -520,7 +612,8 @@ class Document(object):
         self.loaded_from = []
 
     def GetElement(self, element_id):
-        for element in self.hosts + self.pipes + self.instances:
+        for element in self.hosts + self.pipes + self.instances + \
+                self.levels:
             if element.Id == element_id:
                 return element
         return None
@@ -1088,6 +1181,141 @@ expected_half = (300 * MM * t + 2 * 55 * MM * math.sqrt(1 + t * t)
 check("layered wall: sized for the full thickness",
       wall.solid.holes and close(wall.solid.holes[0][3], expected_half),
       wall.solid.holes)
+
+# 18. A pipe leaning with a 30 degree roof. 2.47.0 sized this as if the
+#     faces were flat, 242 mm a side where the pipe needs 288 (sampled
+#     over the pipe's surface in test_openings_model.py and in a probe).
+def leaning_pipe(tilt, length=3.0):
+    t = math.radians(tilt)
+    d = (math.sin(t), 0.0, math.cos(t))
+    return Pipe(model.scale(d, -length), model.scale(d, length), 160)
+
+
+roof = SlopedRoof(30, 300 * MM)
+vent = leaning_pipe(30)
+doc = Document(hosts=[roof], pipes=[vent])
+rec = run_script(doc, [roof], settings(amount=0, round_to=0))
+hole = last_hole(roof)
+check("sloped roof: cut", hole is not None and
+      crossing_count(roof, vent) == 0, getattr(rec, "raised", hole))
+check("sloped roof: wide enough for the leaning pipe (needs 288.3 a side)",
+      hole and 288.3 * MM <= hole[3] <= 290 * MM,
+      hole and hole[3] / MM)
+check("sloped roof: no wider across the slope than the pipe",
+      hole and close(hole[4], 80 * MM), hole and hole[4] / MM)
+check("sloped roof: the off square angle is to the roof, 60 degrees",
+      u"| 60° |" in rec.text(), rec.text())
+check("sloped roof: no flat warning when the faces were read",
+      u"sized as if flat" not in rec.text())
+
+# ...and a vertical vent through the same roof stays pipe sized.
+roof = SlopedRoof(30, 300 * MM)
+vent = leaning_pipe(0)
+doc = Document(hosts=[roof], pipes=[vent])
+rec = run_script(doc, [roof], settings(amount=0, round_to=0))
+hole = last_hole(roof)
+check("sloped roof, vertical vent: 160 x 160",
+      hole and close(hole[3], 80 * MM) and close(hole[4], 80 * MM), hole)
+
+# 19. Faces Revit will not give up: still cut, sized flat, and said so.
+roof = SlopedRoof(30, 300 * MM)
+roof.solid.faces_unreadable = True
+vent = leaning_pipe(30)
+doc = Document(hosts=[roof], pipes=[vent])
+rec = run_script(doc, [roof], settings(amount=0, round_to=0))
+check("faces unreadable: still cut", len(roof.solid.holes) == 1,
+      getattr(rec, "raised", ""))
+check("faces unreadable: the row says it was sized as flat",
+      u"sized as if flat" in rec.text(), rec.text())
+
+# 20. The table is printed whole: header and rows in one print_md, or
+#     pyRevit renders each row as a table of its own and nothing lines
+#     up (seen in Revit at 2.47.0).
+floor = Floor((0.0, 0.0, 0.0), (20.0, 20.0, 250 * MM))
+pipes = [Pipe((5.0, 6.0, -3.0), (5.0, 6.0, 3.0), 110),
+         Pipe((9.0, 6.0, -3.0), (9.0, 6.0, 3.0), 50)]
+doc = Document(hosts=[floor], pipes=pipes)
+rec = run_script(doc, [floor], settings())
+tables = [line for line in rec.lines if line.startswith(u"| Host |")]
+check("table: printed twice, before and after",
+      len(tables) == 2, len(tables))
+check("table: header, rule and both rows in one call",
+      tables and all(table.count(u"\n") == 3 for table in tables),
+      tables)
+check("table: no row printed on its own",
+      not [line for line in rec.lines
+           if line.startswith(u"| ") and not line.startswith(u"| Host |")])
+check("table: every row has the header's six columns",
+      tables and all(row.count(u"|") == 7
+                     for table in tables for row in table.split(u"\n")),
+      tables)
+check("table: before the run each row says what will happen",
+      tables and tables[0].count(u"will be cut") == 2, tables)
+
+# 21. Revit wants a roof's opening sketch on one particular plane. Each
+#     likely height is tried in its own transaction and the first it
+#     keeps is used; the hole is the same whichever, being vertical.
+def roof_on_level(wanted, refusal="raise", offset=1.0, elevation=-1.0):
+    roof = SlopedRoof(30, 300 * MM)
+    level = Level(elevation)
+    roof.LevelId = level.Id
+    roof.params["roof_offset"] = Parameter(offset)
+    roof.sketch_refusal = refusal
+    roof.sketch_z = {"level and offset": elevation + offset,
+                     "level": elevation,
+                     "nowhere": 99.0}.get(wanted, wanted)
+    vent = leaning_pipe(0)
+    doc = Document(hosts=[roof], pipes=[vent])
+    doc.levels.append(level)
+    return roof, vent, doc
+
+
+roof, vent, doc = roof_on_level("level and offset")
+rec = run_script(doc, [roof], settings())
+check("sketch plane: level and offset tried first, and kept",
+      doc.sketch_heights == [0.0] and len(roof.solid.holes) == 1,
+      doc.sketch_heights)
+check("sketch plane: reported plainly when the first try works",
+      u"| made |" in rec.text(), rec.text())
+
+roof, vent, doc = roof_on_level("level")
+rec = run_script(doc, [roof], settings())
+check("sketch plane: refused at level and offset, kept at the level",
+      doc.sketch_heights == [0.0, -1.0] and len(roof.solid.holes) == 1,
+      doc.sketch_heights)
+check("sketch plane: the pipe is clear", crossing_count(roof, vent) == 0)
+check("sketch plane: the report says where it was sketched",
+      u"made, sketched at its level" in rec.text(), rec.text())
+check("sketch plane: nothing left over from the refused try",
+      not doc.pending and not doc.pending_errors)
+
+roof, vent, doc = roof_on_level("level", refusal="failure")
+rec = run_script(doc, [roof], settings())
+check("sketch plane: a refusal at commit is also tried again",
+      len(roof.solid.holes) == 1 and
+      u"made, sketched at its level" in rec.text(), rec.text())
+
+# Offset 0.5, so level and offset (-0.5) is not the project's zero.
+roof, vent, doc = roof_on_level("nowhere", offset=0.5)
+rec = run_script(doc, [roof], settings())
+check("sketch plane: nowhere accepted, every height tried once",
+      len(doc.sketch_heights) == 4 and not roof.solid.holes,
+      doc.sketch_heights)
+check("sketch plane: Revit's words reported once, not four times",
+      rec.text().count(u"Can't change plane") == 1, rec.text())
+check("sketch plane: the report names every height tried",
+      u"(sketch tried at its level and offset, its level, the middle of "
+      u"the host, the project's zero)" in rec.text(), rec.text())
+check("sketch plane: counted as not cut",
+      any(u"0 opening(s) cut" in a for a in rec.alerts), rec.alerts)
+
+# A roof on a level at the project's zero, no offset: its level and the
+# project's zero are one height, and it is tried once.
+roof, vent, doc = roof_on_level("nowhere", offset=0.0, elevation=0.0)
+rec = run_script(doc, [roof], settings())
+check("sketch plane: the same height is not tried twice",
+      len(doc.sketch_heights) == len(set(doc.sketch_heights)) == 2,
+      doc.sketch_heights)
 
 # --------------------------------------------------------------------------
 # The checks can fail

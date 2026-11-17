@@ -33,6 +33,8 @@ Read from the API documentation only:
         RBS_CONDUIT_OUTER_DIAM_PARAM, RBS_REFERENCE_INSULATION_THICKNESS
     RevitLinkInstance.GetLinkDocument / GetTotalTransform,
         Transform.OfPoint
+    Solid.Faces, Face.Project (IntersectionResult.Distance and
+        .UVPoint) and Face.ComputeNormal, for the face normals
 """
 
 from avh_openings import model
@@ -315,9 +317,47 @@ def axis_segments(DB, solids, start, end):
     return model.join_segments(pieces)
 
 
+# A face further than this from where the axis left the solid is not
+# the face it crossed. Half a millimetre.
+FACE_TOLERANCE_FT = 0.5 / model.MM_PER_FOOT
+
+
+def face_normal(DB, solids, point):
+    """The normal of the face the axis crosses at `point`, or None.
+
+    A sloped roof's faces are not square to the vertical cut, and the
+    opening for a leaning pipe depends on how they slope (see
+    `avh_openings.model`). The face is the one `point` lies on: the
+    nearest by Face.Project, and only when it is within half a
+    millimetre. None leaves the sizing on the cut direction, which is
+    right for walls and flat slabs and is what 2.47.0 did everywhere.
+    """
+    best = None
+    best_distance = FACE_TOLERANCE_FT
+    target = DB.XYZ(*point)
+    for solid in solids:
+        try:
+            faces = list(solid.Faces)
+        except BaseException:
+            continue
+        for face in faces:
+            try:
+                result = face.Project(target)
+                if result is None or result.Distance > best_distance:
+                    continue
+                normal = face.ComputeNormal(result.UVPoint)
+            except BaseException:
+                continue
+            best_distance = result.Distance
+            best = xyz(normal)
+    return best
+
+
 def crossings(DB, host, pipes):
-    """[(pipe, entry, exit)] for every pipe whose axis passes through
-    the host. A pipe that crosses the same host twice gives two."""
+    """[(pipe, entry, exit, entry_normal, exit_normal)] for every pipe
+    whose axis passes through the host. A pipe that crosses the same
+    host twice gives two. A normal is None where the face could not be
+    read."""
     found = []
     for pipe in pipes:
         if pipe.diameter <= 0:
@@ -327,5 +367,7 @@ def crossings(DB, host, pipes):
             continue
         for entry, exit in axis_segments(DB, host.solids, pipe.start,
                                          pipe.end):
-            found.append((pipe, entry, exit))
+            found.append((pipe, entry, exit,
+                          face_normal(DB, host.solids, entry),
+                          face_normal(DB, host.solids, exit)))
     return found

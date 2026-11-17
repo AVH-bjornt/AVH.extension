@@ -12,29 +12,45 @@ pipe. A pipe crossing at an angle needs more, and getting that wrong
 gives a hole the pipe does not fit through, which looks fine in plan
 and is found on site.
 
-The hole is worked out exactly for a straight slab of any thickness.
-Where the pipe's axis meets each face, the pipe's cut is an ellipse
-whose semi axes are r and r / cos(angle). The region the pipe occupies
-inside the slab, seen along the slab's normal, is that ellipse swept
-along the axis from one face to the other. So:
+Where the pipe's axis meets a face, the pipe's cut is an ellipse. The
+part of the pipe inside the host is the convex hull of the two face
+ellipses, so what the opening has to cover is those two ellipses seen
+along the cut direction n, and everything between them.
 
-- the opening is centred on the midpoint of the two points where the
-  axis meets the faces, projected onto the face;
-- in any direction w lying in the face, it reaches out from those two
-  points by r * sqrt(1 + ((d.w) / (d.n))^2), where d is the pipe's
-  direction and n the slab's normal (`reach` below);
-- a circle has to hold the whole swept ellipse, so its radius is half
-  the projected axis plus the ellipse's long semi axis, r / |d.n|.
+**The faces are not assumed square to the cut.** A wall is cut through
+its own thickness and its faces are square to that, but a floor or roof
+is cut vertically, and a sloped roof's faces lean away from vertical.
+2.47.0 sized every host as if its faces were square to the cut, which
+is exact for walls and flat slabs and too small for a pipe leaning the
+same way as a roof slopes: 46 mm short a side for a 160 mm pipe at 30
+degrees through a 30 degree roof, 126 mm at 45.
+
+So each face's real normal m is used. A point on the cut at that face
+is r * (e - d (e.m) / (d.m)) from the axis, for e any unit vector
+square to the pipe's direction d. Seen along n, that is an ellipse
+given by two conjugate semi axes (`face_ellipse`), and from those:
+
+- in a direction w across the opening it reaches sqrt((w.c1)^2 +
+  (w.c2)^2) past the axis point (`ellipse_reach`);
+- its longest semi axis is the square root of the larger eigenvalue of
+  their Gram matrix (`ellipse_semi_major`).
+
+The rectangle is the box round both ellipses at both axis points. The
+circle is centred between the two axis points and reaches the farther
+ellipse's far side. With m equal to n these reduce to the square case:
+r * sqrt(1 + ((d.w) / (d.n))^2) and r / |d.n|.
 
 Then the clearance is added on every side and the size is rounded up,
 never down, to the step the user chose.
 
 ## What is refused
 
-A pipe running nearly along a wall rather than through it would need an
+A pipe running nearly along a face rather than through it would need an
 opening that is long, thin and almost certainly not what anyone wants.
-Past `MAX_SKEW_DEGREES` off square the crossing is reported and left
-alone rather than cut.
+Past `MAX_SKEW_DEGREES` off square to the face (the face itself, not
+the cut direction) the crossing is reported and left alone. Likewise a
+face nearly parallel to the cut direction, which a vertical cut cannot
+open.
 """
 
 import math
@@ -351,12 +367,43 @@ def skew_degrees(direction, normal):
     return math.degrees(math.acos(cosine))
 
 
-def reach(radius, direction, normal, along):
-    """How far the pipe's cut at a face reaches along `along`, which lies
-    in the face. r for a pipe square to the face, more when it leans."""
-    d_n = dot(direction, normal)
-    d_w = dot(direction, along)
-    return radius * math.sqrt(1.0 + (d_w / d_n) ** 2)
+# A face closer than this to parallel with the cut direction cannot be
+# opened by that cut: cos(85 degrees).
+MIN_FACE_TO_CUT = 0.087
+
+
+def square_to(direction):
+    """Two unit vectors square to `direction` and to each other."""
+    helper = (0.0, 0.0, 1.0) if abs(direction[2]) < 0.9 \
+        else (1.0, 0.0, 0.0)
+    first = unit(cross(direction, helper))
+    return first, cross(direction, first)
+
+
+def face_ellipse(radius, direction, face_normal, frame):
+    """The pipe's cut at a face, seen along frame.n, as two conjugate
+    semi axes in the frame's (u, v). The ellipse is every
+    cos(t) * c1 + sin(t) * c2 about the axis point."""
+    d_m = dot(direction, face_normal)
+    axes = []
+    for e in square_to(direction):
+        a = sub(e, scale(direction, dot(e, face_normal) / d_m))
+        axes.append((radius * dot(a, frame.u), radius * dot(a, frame.v)))
+    return axes[0], axes[1]
+
+
+def ellipse_reach(c1, c2, index):
+    """How far the ellipse reaches along u (index 0) or v (index 1)."""
+    return math.sqrt(c1[index] ** 2 + c2[index] ** 2)
+
+
+def ellipse_semi_major(c1, c2):
+    """The ellipse's longest semi axis."""
+    a = c1[0] ** 2 + c1[1] ** 2
+    b = c1[0] * c2[0] + c1[1] * c2[1]
+    c = c2[0] ** 2 + c2[1] ** 2
+    largest = (a + c) / 2.0 + math.sqrt(((a - c) / 2.0) ** 2 + b * b)
+    return math.sqrt(largest)
 
 
 class Opening(object):
@@ -398,41 +445,62 @@ class Opening(object):
             format_number(self.height * MM_PER_FOOT))
 
 
-def size_opening(entry, exit, pipe_diameter, frame, settings):
+def size_opening(entry, exit, pipe_diameter, frame, settings,
+                 entry_normal=None, exit_normal=None):
     """The opening for a pipe whose axis meets the host's faces at
-    `entry` and `exit`. Returns (Opening, "") or (None, reason)."""
+    `entry` and `exit`, where the faces' normals are `entry_normal` and
+    `exit_normal` (either way round; frame.n when not known). Returns
+    (Opening, "") or (None, reason)."""
     axis = sub(exit, entry)
     direction = unit(axis)
     if direction is None:
         return None, u"the pipe only touches the host"
     if pipe_diameter <= 0:
         return None, u"the pipe has no diameter"
-    skew = skew_degrees(direction, frame.n)
+
+    faces = []
+    for normal in (entry_normal, exit_normal):
+        normal = unit(normal) if normal is not None else None
+        faces.append(normal if normal is not None else frame.n)
+    for normal in faces:
+        if abs(dot(normal, frame.n)) < MIN_FACE_TO_CUT:
+            return None, (u"the face it crosses is too steep to cut "
+                          u"through from here")
+    skew = max(skew_degrees(direction, normal) for normal in faces)
     if skew > MAX_SKEW_DEGREES:
         return None, (u"it runs {0} degrees off square, more along the "
                       u"host than through it".format(int(round(skew))))
 
     radius = pipe_diameter / 2.0
     gap = gap_feet(settings, pipe_diameter)
-    a = frame.local(entry)
-    b = frame.local(exit)
-    center = frame.to_world((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0,
-                            (a[2] + b[2]) / 2.0)
+    points = [frame.local(entry), frame.local(exit)]
+    ellipses = [face_ellipse(radius, direction, normal, frame)
+                for normal in faces]
+    depth = (points[0][2] + points[1][2]) / 2.0
 
     if settings.shape == CIRCULAR:
-        span = math.hypot(b[0] - a[0], b[1] - a[1])
-        long_semi = radius / abs(dot(direction, frame.n))
-        diameter = span + 2.0 * long_semi + 2.0 * gap
-        return Opening(CIRCULAR, frame, center,
+        cu = (points[0][0] + points[1][0]) / 2.0
+        cv = (points[0][1] + points[1][1]) / 2.0
+        reach_out = max(
+            math.hypot(point[0] - cu, point[1] - cv) +
+            ellipse_semi_major(c1, c2)
+            for point, (c1, c2) in zip(points, ellipses))
+        diameter = 2.0 * reach_out + 2.0 * gap
+        return Opening(CIRCULAR, frame, frame.to_world(cu, cv, depth),
                        diameter=round_up(diameter, settings.round_to),
                        pipe_diameter=pipe_diameter, skew=skew), u""
 
-    span_u = abs(b[0] - a[0])
-    span_v = abs(b[1] - a[1])
-    width = span_u + 2.0 * reach(radius, direction, frame.n, frame.u) \
-        + 2.0 * gap
-    height = span_v + 2.0 * reach(radius, direction, frame.n, frame.v) \
-        + 2.0 * gap
+    lows = []
+    highs = []
+    for index in (0, 1):
+        lows.append(min(point[index] - ellipse_reach(c1, c2, index)
+                        for point, (c1, c2) in zip(points, ellipses)))
+        highs.append(max(point[index] + ellipse_reach(c1, c2, index)
+                         for point, (c1, c2) in zip(points, ellipses)))
+    center = frame.to_world((lows[0] + highs[0]) / 2.0,
+                            (lows[1] + highs[1]) / 2.0, depth)
+    width = highs[0] - lows[0] + 2.0 * gap
+    height = highs[1] - lows[1] + 2.0 * gap
     return Opening(RECTANGULAR, frame, center,
                    width=round_up(width, settings.round_to),
                    height=round_up(height, settings.round_to),
