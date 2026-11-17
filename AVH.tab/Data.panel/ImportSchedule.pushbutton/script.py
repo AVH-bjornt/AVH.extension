@@ -94,6 +94,15 @@ def show(value):
     return to_text(value)
 
 
+def table_cell(text):
+    """Text that cannot break a markdown table: a pipe character would
+    start a new column and a line break a new row. Never empty, so a row
+    always has the header's column count."""
+    text = to_text(text).replace(u"|", u"/")
+    text = text.replace(u"\r", u" ").replace(u"\n", u" ").strip()
+    return text or u"-"
+
+
 def link(element_id):
     try:
         return output.linkify(DB.ElementId(element_id))
@@ -113,13 +122,17 @@ def report_plan(snapshot, diff, plan):
 
     if plan.ready:
         output.print_md(u"#### Will be written")
-        output.print_md(u"| Element | Column | Was | Becomes |")
-        output.print_md(u"| --- | --- | --- | --- |")
+        # The table goes out whole in one print_md: pyRevit renders each
+        # call as a document of its own, so a table printed a line at a time
+        # comes out as one table per row and the columns do not line up.
+        lines = [u"| Element | Column | Was | Becomes |",
+                 u"| --- | --- | --- | --- |"]
         for planned in plan.ready[:MAX_LISTED]:
             change = planned.change
-            output.print_md(u"| {0} | {1} | {2} | {3} |".format(
-                link(change.element_id), change.field.name,
-                show(change.old), show(change.new)))
+            lines.append(u"| {0} | {1} | {2} | {3} |".format(
+                link(change.element_id), table_cell(change.field.name),
+                table_cell(show(change.old)), table_cell(show(change.new))))
+        output.print_md(u"\n".join(lines))
         if len(plan.ready) > MAX_LISTED:
             output.print_md(u"_and {0} more_".format(
                 len(plan.ready) - MAX_LISTED))

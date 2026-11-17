@@ -193,17 +193,31 @@ def move(doc, kind, element, target_id, tally):
     tally.count_moved(kind)
 
 
+def table_cell(text):
+    """Text that cannot break a markdown table: a pipe character would
+    start a new column and a line break a new row. Never empty, so a row
+    always has the header's column count."""
+    text = to_text(text).replace(u"|", u"/")
+    text = text.replace(u"\r", u" ").replace(u"\n", u" ").strip()
+    return text or u"-"
+
+
 def report(tally, workset_name):
     output.print_md(u"### {0}".format(TITLE))
     output.print_md(u"Target workset: **{0}**".format(workset_name))
 
     rows = tally.rows()
     if rows:
-        output.print_md(u"| | Moved | Already there | Left alone |")
-        output.print_md(u"| --- | ---: | ---: | ---: |")
+        # The table goes out whole in one print_md: pyRevit renders each
+        # call as a document of its own, so a table printed a line at a time
+        # comes out as one table per row and the columns do not line up.
+        lines = [u"| Datum | Moved | Already there | Left alone |",
+                 u"| --- | ---: | ---: | ---: |"]
         for label, moved, already, skipped in rows:
-            output.print_md(u"| {0} | {1} | {2} | {3} |".format(
-                label, moved, already, skipped))
+            lines.append(u"| {0} | {1} | {2} | {3} |".format(
+                table_cell(label), table_cell(moved), table_cell(already),
+                table_cell(skipped)))
+        output.print_md(u"\n".join(lines))
 
     output.print_md(u"**{0} moved**, {1} already there.".format(
         tally.total_moved(), tally.total_already()))

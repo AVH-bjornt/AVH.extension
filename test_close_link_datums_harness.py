@@ -50,6 +50,41 @@ def check(name, condition, detail=""):
     results.append((name, bool(condition), detail))
 
 
+def table_problems(printed, header, data_rows=None):
+    """Why the markdown table that starts with `header` did not go out
+    whole in one print_md call, or an empty list when it did. pyRevit
+    renders each print_md call as a document of its own, so a table
+    printed a line at a time comes out as one table per row and the
+    columns do not line up. Each call recorded is one item of `printed`.
+    """
+    tables = [text for text in printed if text.startswith(header)]
+    if len(tables) != 1:
+        return [u"{0} calls start with the header".format(len(tables))]
+    rows = tables[0].split(u"\n")
+    problems = []
+    if len(rows) < 3:
+        problems.append(u"header without rows in its call")
+    if data_rows is not None and len(rows) - 2 != data_rows:
+        problems.append(u"{0} data rows, wanted {1}".format(
+            len(rows) - 2, data_rows))
+    columns = header.count(u"|")
+    for row in rows:
+        if row.count(u"|") != columns:
+            problems.append(u"not the header's column count: " + row)
+        if u"" in [cell.strip() for cell in row.split(u"|")[1:-1]]:
+            problems.append(u"empty cell: " + row)
+    # Any other call that is table lines but not a whole table: a row,
+    # or a header and rule, printed on its own.
+    strays = [text for text in printed
+              if text.lstrip().startswith(u"|") and not
+              (len(text.split(u"\n")) >= 3 and
+               set(text.split(u"\n")[1]) <= set(u"|-: "))]
+    if strays:
+        problems.append(u"table lines in calls of their own: {0}".format(
+            len(strays)))
+    return problems
+
+
 # --------------------------------------------------------------------------
 # The fake Revit
 # --------------------------------------------------------------------------
@@ -452,6 +487,9 @@ check("run: reported as closed",
       u"| ARK.rvt | closed | file path |" in recorder.text(),
       recorder.text())
 check("run: summary line", u"**1 of 1 closed.**" in recorder.text())
+problems = table_problems(recorder.printed, u"| Link | Result | Route |", 1)
+check("run: the table goes out whole, one print_md, header's "
+      "column count", not problems, problems)
 check("run: no alert when everything worked", not recorder.alerts,
       u" | ".join(recorder.alerts))
 
