@@ -307,10 +307,117 @@ class Element(object):
 
     def __init__(self):
         Element._next[0] += 1
-        self.Id = ElementId(Element._next[0])
+        self._id = ElementId(Element._next[0])
+        self.gone = False         # deleted: Revit refuses its Id then
+        self.UniqueId = u"uid-{0}".format(Element._next[0])
+        self.entities = {}
+        self.cuts = []            # [(host, hole)] this element has cut
+        self.locked = False       # checked out by someone else
+
+    @property
+    def Id(self):
+        """A deleted element's Id raises, as in Revit (2.48.0's report
+        crashed on it, reading the Id of an opening it had re-cut)."""
+        if self.gone:
+            raise Exception(u"The referenced object is not valid, "
+                            u"possibly because it has been deleted from "
+                            u"the database, or its creation was undone.")
+        return self._id
 
     def get_BoundingBox(self, view):
         return None
+
+    def SetEntity(self, entity):
+        if ExtensibleStorage.broken:
+            raise Exception(u"extensible storage is unavailable")
+        if ExtensibleStorage.lossy:
+            return                    # says nothing, keeps nothing
+        self.entities[entity.schema.guid] = entity
+
+    def GetEntity(self, schema):
+        return self.entities.get(schema.guid) or ESEntity(None)
+
+
+class Opening(Element):
+    """What NewOpening returns: a wall, floor or roof opening."""
+
+
+# --------------------------------------------------------------------------
+# Extensible storage
+# --------------------------------------------------------------------------
+
+class _Generic(object):
+    """entity.Set[String](...) and entity.Get[String](...) in IronPython
+    are a generic method indexed by a type."""
+
+    def __init__(self, function):
+        self.function = function
+
+    def __getitem__(self, kind):
+        return self.function
+
+
+class ESSchema(object):
+    registry = {}
+
+    def __init__(self, guid, fields):
+        self.guid = guid
+        self.fields = fields
+
+    @staticmethod
+    def Lookup(guid):
+        return ESSchema.registry.get(guid)
+
+
+class SchemaBuilder(object):
+    def __init__(self, guid):
+        self.guid = guid
+        self.fields = {}
+        self.name = None
+
+    def SetReadAccessLevel(self, level):
+        pass
+
+    def SetWriteAccessLevel(self, level):
+        pass
+
+    def SetSchemaName(self, name):
+        self.name = name
+
+    def AddSimpleField(self, name, kind):
+        self.fields[name] = kind
+
+    def Finish(self):
+        if self.guid in ESSchema.registry:
+            raise Exception(u"a schema with this GUID already exists")
+        schema = ESSchema(self.guid, dict(self.fields))
+        ESSchema.registry[self.guid] = schema
+        return schema
+
+
+class ESEntity(object):
+    def __init__(self, schema):
+        self.schema = schema
+        self.values = {}
+        self.Set = _Generic(self._set)
+        self.Get = _Generic(self._get)
+
+    def _set(self, name, value):
+        if self.schema is None or name not in self.schema.fields:
+            raise Exception(u"no field {0}".format(name))
+        self.values[name] = value
+
+    def _get(self, name):
+        return self.values.get(name)
+
+    def IsValid(self):
+        return self.schema is not None
+
+
+ExtensibleStorage = types.SimpleNamespace(
+    Schema=ESSchema, SchemaBuilder=SchemaBuilder, Entity=ESEntity,
+    AccessLevel=types.SimpleNamespace(Public="public"), broken=False,
+    lossy=False)
 
 
 class Host(Element):
@@ -445,7 +552,7 @@ class Level(Element):
         self.Elevation = elevation
 
 
-class Shaft(Element):
+class Shaft(Opening):
     """A shaft opening from `base` to `top`, carried by its offsets. It
     cuts every floor and roof it reaches within that band: the band is
     run as a vertical line through the shaft's centre in plan, and any
@@ -549,6 +656,7 @@ class FamilyInstance(Element):
     def __init__(self, doc, point, symbol, wall, off_by=None):
         Element.__init__(self)
         self.doc = doc
+        self.Symbol = symbol
         self.wall = wall
         self.off_by = off_by
         self._point = point.t()
@@ -634,7 +742,7 @@ class Create(object):
                     abs(q[0] - p[0]) / 2, abs(q[1] - p[1]) / 2)
         if doc.misplace:
             hole = (hole[0], hole[1] + 5.0) + hole[2:]
-        opening = Element()
+        opening = Opening()
         doc.pending.append((host, hole, opening))
         return opening
 
@@ -675,6 +783,9 @@ class Document(object):
         self.refuse_hosts = set()
         self.pending_shafts = []
         self.shafts = []
+        self.openings = []        # committed openings and shafts
+        self.deleted = []
+        self.undo = []
         self.no_shafts = False
         self.shaft_params_refuse = False
         self.levels = []
@@ -686,9 +797,13 @@ class Document(object):
         self.loaded_from = []
 
     def GetElement(self, element_id):
-        for element in self.hosts + self.pipes + self.instances + \
-                self.levels:
-            if element.Id == element_id:
+        everything = (self.hosts + self.pipes + self.instances +
+                      self.levels + self.openings + self.links)
+        for element in everything:
+            if isinstance(element_id, str):
+                if element.UniqueId == element_id:
+                    return element
+            elif element.Id == element_id:
                 return element
         return None
 
@@ -706,23 +821,70 @@ class Document(object):
             self.pending_errors = []
             self.rollback()
             return False
-        for host, hole, _ in self.pending:
+        for host, hole, opening in self.pending:
             host.solid.holes.append(hole)
+            opening.cuts = [(host, hole)]
+            self.openings.append(opening)
         for shaft in self.pending_shafts:
             self.shafts.append(shaft)
+            self.openings.append(shaft)
             for host in self.hosts:
                 if shaft.reaches(host):
-                    host.solid.holes.append(shaft.hole(host))
+                    hole = shaft.hole(host)
+                    host.solid.holes.append(hole)
                     shaft.cut.append(host)
+                    shaft.cuts.append((host, hole))
         self.pending_shafts = []
         for instance in self.pending_instances:
             instance.refresh()
-            instance.wall.solid.holes.append(instance.cut())
+            hole = instance.cut()
+            instance.wall.solid.holes.append(hole)
+            instance.cuts = [(instance.wall, hole)]
         self.pending = []
         self.pending_instances = []
+        self.undo = []
         return True
 
+    def Delete(self, element_id):
+        """Delete an opening, shaft or round family instance, taking its
+        holes out of the hosts at once, so a regenerate sees the host
+        whole. Undone by a rollback: state that outlived a rolled back
+        transaction is the harness bug this kind of fake has had most."""
+        found = None
+        for collection in (self.openings, self.instances):
+            for element in collection:
+                if element.Id == element_id:
+                    found = (collection, element)
+        if found is None:
+            raise Exception(u"no element {0} to delete".format(
+                element_id.Value))
+        collection, element = found
+        if element.locked:
+            raise Exception(u"it is checked out by another user")
+        self.deleted.append(element)
+        element.gone = True
+        index = collection.index(element)
+        collection.remove(element)
+        removed = []
+        for host, hole in element.cuts:
+            if hole in host.solid.holes:
+                position = host.solid.holes.index(hole)
+                host.solid.holes.pop(position)
+                removed.append((host, position, hole))
+
+        def put_back():
+            element.gone = False
+            collection.insert(index, element)
+            for host, position, hole in reversed(removed):
+                host.solid.holes.insert(position, hole)
+            self.deleted.remove(element)
+        self.undo.append(put_back)
+        return [element_id]
+
     def rollback(self):
+        for put_back in reversed(self.undo):
+            put_back()
+        self.undo = []
         self.pending_shafts = []
         for instance in self.pending_instances:
             self.instances.remove(instance)
@@ -837,6 +999,10 @@ class Collector(object):
             self.result = list(self.doc.symbols)
         elif cls is Level:
             self.result = list(self.doc.levels)
+        elif cls is Opening:
+            self.result = list(self.doc.openings)
+        elif cls is FamilyInstance:
+            self.result = list(self.doc.instances)
         else:
             self.result = []
         return self
@@ -865,7 +1031,8 @@ def make_db():
             XYZ=XYZ, Line=Line, Arc=Arc, CurveArray=CurveArray,
             Solid=Solid, GeometryInstance=GeometryInstance,
             Options=Options, Wall=Wall, Floor=Floor, RoofBase=RoofBase,
-            Level=Level,
+            Level=Level, Opening=Opening, FamilyInstance=FamilyInstance,
+            ExtensibleStorage=ExtensibleStorage,
             WallKind=WallKind, BuiltInParameter=BuiltInParameter,
             BuiltInCategory=BuiltInCategory, FamilySymbol=FamilySymbol,
             RevitLinkInstance=RevitLinkInstance,
@@ -906,6 +1073,7 @@ class Recorder(object):
         self.asked = []
         self.config = Config()
         self.saved = 0
+        self.questions = []
 
     def ask(self, settings, hosts_line):
         self.asked.append((settings, hosts_line))
@@ -914,6 +1082,11 @@ class Recorder(object):
     def alert(self, message, **kwargs):
         self.alerts.append(message)
         if kwargs.get("yes"):
+            self.questions.append(message)
+            if isinstance(self.confirm, list):
+                # One answer per yes/no question, in order. A question
+                # nobody expected gets "no", and is recorded.
+                return self.confirm.pop(0) if self.confirm else False
             return self.confirm
         return True
 
@@ -924,7 +1097,8 @@ class Recorder(object):
         return u"\n".join(self.lines)
 
 
-def run_script(doc, selected, settings, confirm=True, recorder=None):
+def run_script(doc, selected, settings, confirm=True, recorder=None,
+               script=None):
     rec = recorder or Recorder(settings, confirm)
     rec.settings = settings
     rec.confirm = confirm
@@ -969,7 +1143,7 @@ def run_script(doc, selected, settings, confirm=True, recorder=None):
     sys.modules["avh_openings.window"] = window
     avh_openings.window = window
     try:
-        runpy.run_path(SCRIPT, run_name="__main__")
+        runpy.run_path(script or SCRIPT, run_name="__main__")
     except Exception as exc:
         rec.raised = exc
     finally:
@@ -1289,7 +1463,7 @@ check("sloped roof: wide enough for the leaning pipe (needs 288.3 a side)",
 check("sloped roof: no wider across the slope than the pipe",
       hole and close(hole[4], 80 * MM), hole and hole[4] / MM)
 check("sloped roof: the off square angle is to the roof, 60 degrees",
-      u"| 60° |" in rec.text(), rec.text())
+      u"| 60\u00b0 |" in rec.text(), rec.text())
 check("sloped roof: no flat warning when the faces were read",
       u"sized as if flat" not in rec.text())
 
@@ -1491,6 +1665,329 @@ doc.levels.append(Level(0.0))
 rec = run_script(doc, [wall], settings())
 check("wall refused: no shaft tried", not doc.shafts and
       u"shaft" not in rec.text(), rec.text())
+
+# ==========================================================================
+# Tagging, and Update Openings
+# ==========================================================================
+
+from avh_openings import storage, tags  # noqa: E402
+
+UPDATE = os.path.join(HERE, "AVH.tab", "Model.panel",
+                      "Update Openings.pushbutton", "script.py")
+
+
+def first(elements):
+    """The first element, or None. A scenario that indexes an empty list
+    crashes the run and hides every check after it; two mutations did
+    exactly that before this."""
+    return elements[0] if elements else None
+
+
+def hole_at(host, index):
+    """A coordinate of the host's first hole, or NaN when it has none,
+    which fails close() rather than crashing the run."""
+    holes = host.solid.holes
+    return holes[0][index] if holes else float("nan")
+
+
+def tag_of(element):
+    text = storage.read(make_db(), element)
+    return tags.decode(text) if text else None
+
+
+def move_pipe(pipe, dx=0.0, dy=0.0, dz=0.0):
+    """Move a fake pipe, as if someone dragged it in Revit."""
+    pipe.a = model.add(pipe.a, (dx, dy, dz))
+    pipe.b = model.add(pipe.b, (dx, dy, dz))
+    pipe.Location = Location(curve=Line(XYZ(*pipe.a), XYZ(*pipe.b)))
+
+
+def floor_with_opening(pipe_mm=110, at=(5.0, 6.0)):
+    floor = Floor((0.0, 0.0, 0.0), (20.0, 20.0, 250 * MM))
+    pipe = Pipe((at[0], at[1], -3.0), (at[0], at[1], 3.0), pipe_mm)
+    doc = Document(hosts=[floor], pipes=[pipe])
+    run_script(doc, [floor], settings())
+    return floor, pipe, doc
+
+
+def run_update(doc, selected=(), confirm=None):
+    return run_script(doc, list(selected), None,
+                      confirm=list(confirm or []), script=UPDATE)
+
+
+def snapshot(doc):
+    return ([list(h.solid.holes) for h in doc.hosts], list(doc.openings),
+            list(doc.instances))
+
+
+# U1. Pipe Openings tags what it makes.
+floor, pipe, doc = floor_with_opening()
+opening = doc.openings[0] if doc.openings else None
+tag = tag_of(opening) if opening else None
+check("tag: the new opening carries a tag", tag is not None)
+check("tag: it names the pipe and the host",
+      tag and tag.pipe == pipe.UniqueId and tag.host == floor.UniqueId and
+      tag.link == u"" and tag.pipe_kind == u"Pipe",
+      tag and tag.__dict__)
+check("tag: it records how it was made and how big",
+      tag and tag.kind == tags.OPENING and tag.shape == model.RECTANGULAR
+      and close(tag.width, 160 * MM) and close(tag.cx, 5.0) and
+      close(tag.amount, 25.0), tag and tag.__dict__)
+
+# U2. Nothing has changed: nothing is asked and nothing is touched, and
+#     the delete each check makes is rolled back.
+before = snapshot(doc)
+rec = run_update(doc)
+check("unchanged: no exception", not hasattr(rec, "raised"),
+      getattr(rec, "raised", ""))
+check("unchanged: reported as unchanged",
+      u"unchanged, left alone" in rec.text(), rec.text())
+check("unchanged: nothing asked, nothing to do",
+      not rec.questions and any(u"Nothing to do" in a for a in rec.alerts),
+      rec.alerts)
+check("unchanged: the model is exactly as it was",
+      snapshot(doc) == before and not doc.deleted,
+      (snapshot(doc), before))
+
+# U3. The pipe moved 300 mm: the old opening goes, a new one is cut and
+#     tagged where the pipe is now, and the pipe is clear.
+old = first(doc.openings)
+move_pipe(pipe, dx=300 * MM)
+rec = run_update(doc, confirm=[True])
+check("moved: reported as moved 300 mm",
+      u"re-cut: moved 300 mm" in rec.text(), rec.text())
+check("moved: the old opening is deleted", old in doc.deleted)
+check("moved: one opening in the floor, at the pipe",
+      len(floor.solid.holes) == 1 and
+      close(floor.solid.holes[0][1], 5.0 + 300 * MM), floor.solid.holes)
+check("moved: the pipe is clear", crossing_count(floor, pipe) == 0)
+new = doc.openings[-1] if doc.openings else None
+check("moved: the new opening is tagged where the pipe is now",
+      new is not None and new is not old and tag_of(new) and
+      close(tag_of(new).cx, 5.0 + 300 * MM))
+check("moved: the result says updated", u"| updated |" in rec.text(),
+      rec.text())
+
+# ...and running it again finds it unchanged.
+rec = run_update(doc)
+check("moved, then again: unchanged",
+      u"unchanged, left alone" in rec.text() and not rec.questions,
+      rec.text())
+
+# U4. The pipe got bigger: re-cut bigger.
+floor, pipe, doc = floor_with_opening()
+pipe.params["pipe_od"] = Parameter(160 * MM)
+rec = run_update(doc, confirm=[True])
+check("resized: says the pipe size changed",
+      u"pipe 160 mm, was 110" in rec.text(), rec.text())
+check("resized: re-cut at 210",
+      len(floor.solid.holes) == 1 and close(floor.solid.holes[0][3],
+                                            105 * MM), floor.solid.holes)
+
+# U5. The pipe was deleted: orphaned, and kept unless you say delete.
+floor, pipe, doc = floor_with_opening()
+doc.pipes.remove(pipe)
+rec = run_update(doc, confirm=[False])
+check("pipe deleted: orphaned, and said why",
+      u"orphaned: its pipe has been deleted" in rec.text(), rec.text())
+check("pipe deleted: asked about the orphans only",
+      len(rec.questions) == 1 and u"Delete them?" in rec.questions[0],
+      rec.questions)
+check("pipe deleted, answer no: the opening stays",
+      len(floor.solid.holes) == 1 and not doc.deleted)
+rec = run_update(doc, confirm=[True])
+check("pipe deleted, answer yes: the opening is deleted",
+      not floor.solid.holes and len(doc.deleted) == 1, floor.solid.holes)
+check("pipe deleted, answer yes: reported", u"| deleted |" in rec.text(),
+      rec.text())
+
+# U6. The pipe moved right off the floor: orphaned.
+floor, pipe, doc = floor_with_opening()
+move_pipe(pipe, dx=50.0)
+rec = run_update(doc, confirm=[False])
+check("moved away: no longer passes through the floor",
+      u"no longer passes through the floor" in rec.text(), rec.text())
+
+# U7. A pipe in a link: not loaded means cannot check; loaded and moved
+#     means re-cut where the link now puts it.
+floor = Floor((0.0, 0.0, 0.0), (20.0, 20.0, 250 * MM))
+linked = Pipe((1.0, 1.0, -3.0), (1.0, 1.0, 3.0), 110)
+link_doc = Document(pipes=[linked], title=u"MEP_Lagnir")
+instance = RevitLinkInstance(link_doc, (4.0, 5.0, 0.0))
+doc = Document(hosts=[floor], links=[instance])
+run_script(doc, [floor], settings())
+tag = tag_of(first(doc.openings)) if doc.openings else None
+check("link: the tag names the link instance",
+      tag and tag.link == instance.UniqueId and tag.pipe == linked.UniqueId,
+      tag and tag.__dict__)
+instance.link_doc = None
+rec = run_update(doc)
+check("link unloaded: cannot check, left alone",
+      u"left alone: its pipe's link is not loaded" in rec.text() and
+      len(floor.solid.holes) == 1, rec.text())
+instance.link_doc = link_doc
+move_pipe(linked, dy=200 * MM)
+rec = run_update(doc, confirm=[True])
+check("link moved: re-cut where the link puts the pipe now",
+      len(floor.solid.holes) == 1 and close(floor.solid.holes[0][2],
+                                            6.0 + 200 * MM),
+      floor.solid.holes)
+
+# U8. An opening someone else has checked out is left alone.
+floor, pipe, doc = floor_with_opening()
+if doc.openings:
+    doc.openings[0].locked = True
+move_pipe(pipe, dx=300 * MM)
+rec = run_update(doc)
+check("checked out: cannot be changed, said so",
+      u"it cannot be changed: it is checked out by another user"
+      in rec.text(), rec.text())
+check("checked out: untouched", close(hole_at(floor, 1), 5.0) and
+      not doc.deleted and not rec.questions)
+
+# U9. Revit refuses the new opening: the old one stays where it was.
+floor, pipe, doc = floor_with_opening()
+old = first(doc.openings)
+move_pipe(pipe, dx=300 * MM)
+doc.refuse_hosts.add(floor)
+doc.no_shafts = True
+rec = run_update(doc, confirm=[True])
+check("re-cut refused: the old opening is still there",
+      old in doc.openings and old not in doc.deleted and
+      len(floor.solid.holes) == 1 and close(floor.solid.holes[0][1], 5.0),
+      floor.solid.holes)
+check("re-cut refused: said so", u"left as it was" in rec.text(),
+      rec.text())
+
+# U10. A selection limits the check to those hosts.
+floor_a = Floor((0.0, 0.0, 0.0), (20.0, 20.0, 250 * MM))
+floor_b = Floor((0.0, 0.0, 20.0), (20.0, 20.0, 20.0 + 250 * MM))
+pipe = Pipe((5.0, 6.0, -3.0), (5.0, 6.0, 23.0), 110)
+doc = Document(hosts=[floor_a, floor_b], pipes=[pipe])
+run_script(doc, [floor_a, floor_b], settings())
+move_pipe(pipe, dx=300 * MM)
+rec = run_update(doc, selected=[floor_b], confirm=[True])
+check("selection: only the selected floor's opening is re-cut",
+      close(hole_at(floor_a, 1), 5.0) and
+      close(hole_at(floor_b, 1), 5.0 + 300 * MM),
+      (floor_a.solid.holes, floor_b.solid.holes))
+check("selection: the summary says so",
+      any(u"1 tagged opening(s) checked in the selection" in q
+          for q in rec.questions), rec.questions)
+
+# U11. Openings with no tag are counted, not touched.
+floor, pipe, doc = floor_with_opening()
+by_hand = Opening()
+doc.openings.append(by_hand)
+rec = run_update(doc)
+check("untagged: counted in the report",
+      u"1 opening(s) in the model carry no Pipe Openings tag" in rec.text(),
+      rec.text())
+
+# ...and a model with none tagged says there is nothing to update.
+doc = Document(hosts=[], pipes=[])
+doc.openings.append(Opening())
+rec = run_update(doc)
+check("none tagged: nothing to update",
+      any(u"nothing to update" in a for a in rec.alerts), rec.alerts)
+
+# A tag this version cannot read is reported and left alone.
+floor, pipe, doc = floor_with_opening()
+if doc.openings:
+    storage.write(make_db(), doc.openings[0], u"version=9")
+rec = run_update(doc)
+check("unreadable tag: reported, left alone",
+      u"tag version 9 is not one this version" in rec.text() and
+      not doc.deleted, rec.text())
+
+# U12. A shaft through a sloped roof moves with its pipe: the roof still
+#      refuses a vertical cut at every height, the delete is redone and
+#      undone with each refused try, and a new shaft is kept.
+roof, floor, vent, doc, rec = shaft_case()
+old = doc.shafts[0] if doc.shafts else None
+check("shaft tag: kind shaft", old is not None and tag_of(old) and
+      tag_of(old).kind == tags.SHAFT)
+move_pipe(vent, dx=400 * MM)
+rec = run_update(doc, confirm=[True])
+check("shaft moved: re-cut as a shaft",
+      u"updated, made as a shaft opening" in rec.text(), rec.text())
+check("shaft moved: the old shaft deleted, one new one",
+      old in doc.deleted and len([s for s in doc.openings
+                                  if isinstance(s, Shaft)]) == 1,
+      doc.openings)
+check("shaft moved: one hole in the roof, the pipe clear, the floor whole",
+      len(roof.solid.holes) == 1 and crossing_count(roof, vent) == 0 and
+      not floor.solid.holes, (roof.solid.holes, floor.solid.holes))
+
+# U13. A round wall opening follows its pipe along the wall.
+wall = Wall(0.0, 30.0, 300 * MM)
+pipe = Pipe((5.0, -3.0, 4.0), (5.0, 3.0, 4.0), 110)
+doc = Document(hosts=[wall], pipes=[pipe],
+               symbols=[FamilySymbol(u"AVH_Round_Opening")])
+run_script(doc, [wall], settings(shape=model.CIRCULAR))
+old = doc.instances[0] if doc.instances else None
+check("round tag: kind round", old is not None and tag_of(old) and
+      tag_of(old).kind == tags.ROUND)
+move_pipe(pipe, dx=1.0)
+rec = run_update(doc, confirm=[True])
+check("round moved: one instance, at the pipe",
+      len(doc.instances) == 1 and doc.instances[0] is not old and
+      close(doc.instances[0]._point[0], 6.0), doc.instances)
+check("round moved: the pipe is clear", crossing_count(wall, pipe) == 0)
+
+# U14. Saying no to the re-cut changes nothing.
+floor, pipe, doc = floor_with_opening()
+move_pipe(pipe, dx=300 * MM)
+before = snapshot(doc)
+rec = run_update(doc, confirm=[False])
+check("declined: nothing changed", snapshot(doc) == before and
+      not doc.deleted)
+
+# U15. A tag that will not go on is noted on the row, the opening kept.
+ExtensibleStorage.broken = True
+floor = Floor((0.0, 0.0, 0.0), (20.0, 20.0, 250 * MM))
+pipe = Pipe((5.0, 6.0, -3.0), (5.0, 6.0, 3.0), 110)
+doc = Document(hosts=[floor], pipes=[pipe])
+rec = run_script(doc, [floor], settings())
+ExtensibleStorage.broken = False
+check("storage broken: the opening is still made",
+      len(floor.solid.holes) == 1)
+check("storage broken: the report says it is not tagged",
+      u"not tagged, so Update Openings will not see it" in rec.text(),
+      rec.text())
+
+# U18. Revit throws the whole update run away: nothing claimed.
+floor, pipe, doc = floor_with_opening()
+move_pipe(pipe, dx=300 * MM)
+doc.assimilate_status = TransactionStatus.RolledBack
+rec = run_update(doc, confirm=[True])
+check("update rolled back: not reported as updated",
+      u"| updated |" not in rec.text() and
+      u"not kept: Revit rolled the run back" in rec.text(), rec.text())
+check("update rolled back: counted as nothing re-cut",
+      any(u"0 opening(s) re-cut" in a for a in rec.alerts), rec.alerts)
+
+# U16. Storage that quietly keeps nothing is caught by reading back.
+ExtensibleStorage.lossy = True
+floor = Floor((0.0, 0.0, 0.0), (20.0, 20.0, 250 * MM))
+pipe = Pipe((5.0, 6.0, -3.0), (5.0, 6.0, 3.0), 110)
+doc = Document(hosts=[floor], pipes=[pipe])
+rec = run_script(doc, [floor], settings())
+ExtensibleStorage.lossy = False
+check("storage lossy: the report says it is not tagged",
+      u"the tag did not read back as written" in rec.text(), rec.text())
+
+# U17. A re-cut opening that lands off the pipe is caught by the check
+#      after, not reported as updated.
+floor, pipe, doc = floor_with_opening()
+move_pipe(pipe, dx=300 * MM)
+doc.misplace = True
+rec = run_update(doc, confirm=[True])
+check("re-cut misplaced: flagged, not reported as updated",
+      u"does not clear the pipe" in rec.text() and
+      u"| updated |" not in rec.text(), rec.text())
+check("re-cut misplaced: not counted",
+      any(u"0 opening(s) re-cut" in a for a in rec.alerts), rec.alerts)
 
 # --------------------------------------------------------------------------
 # The checks can fail

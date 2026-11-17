@@ -1,5 +1,6 @@
 layout:
   - Place at Coordinate
   - Pipe Openings
+  - Update Openings
   - Point Cloud to Toposolid
   - Remove Level

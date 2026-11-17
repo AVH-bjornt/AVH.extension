@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.47.4.** The authoritative number is `__version__` in
+**Version 2.48.1.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -233,6 +233,30 @@ set so it spans only the host's own thickness under the opening. A
 shaft cuts every floor, roof and ceiling in its height range, which is
 why the range is kept that tight, and the report says when a shaft was
 used.
+
+Every opening Pipe Openings makes is tagged with the pipe it was cut
+for, its host, the settings used and its size, in data Revit keeps on
+the element out of sight. Update Openings reads that.
+
+**Update Openings.** Checks the openings Pipe Openings made against
+their pipes, in the selection (openings, or walls, floors and roofs)
+or, with nothing selected, the whole model. Each is sorted into:
+
+- **unchanged**: left alone;
+- **changed**: the pipe moved, changed size or gained insulation. The
+  old opening is deleted and a new one cut where the pipe is now, with
+  the shape and clearance it was made with;
+- **orphaned**: the pipe has been deleted or no longer passes through
+  the host. You are asked separately whether to delete these; no
+  leaves them;
+- **cannot check**: the pipe's link is not loaded, or the opening is
+  checked out by someone else. Left alone.
+
+The list is shown before anything changes, a new opening Revit refuses
+leaves the old one where it was, and the whole run is one undo.
+Openings made before 2.48.0, or by hand, carry no tag: they are
+counted in the report and not touched. A pipe in a linked model is only
+seen in its new place once the link has been reloaded.
 
 **Point Cloud to Toposolid.** Pick a linked point cloud, a point
 spacing in metres, a toposolid type and a level. The cloud is read in
@@ -568,7 +592,9 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.47.1 | Pipe Openings: sloped roofs and floors sized from their real face slope; report table printed whole so its columns line up | Ran in Revit 2025: the table lined up; a roof opening refused with "Can't change plane of Opening Cut Sketch" |
 | 2.47.2 | Pipe Openings: a floor or roof opening's sketch tried at the host's level and offset, its level, its middle and zero, and kept where Revit accepts it; a refusal names every height tried | Ran in Revit 2025: the roof refused at every height tried (its level, its middle, zero), so the plane is not the cause |
 | 2.47.3 | Report tables printed whole in one go so their columns line up: Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid | Not yet run in Revit |
-| 2.47.4 | Pipe Openings: a floor or roof that refuses a vertical cut at every sketch height gets a shaft opening kept to its own thickness; every report column left aligned, in Pipe Openings and in Stair Ratio, Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid, Align Views, Batch Sheets and Rename Views | Not yet run in Revit, current |
+| 2.47.4 | Pipe Openings: a floor or roof that refuses a vertical cut at every sketch height gets a shaft opening kept to its own thickness; every report column left aligned, in Pipe Openings and in Stair Ratio, Close Link Datums, Datums to Workset, ImportSchedule, Flip Status, Place at Coordinate, Point Cloud to Toposolid, Align Views, Batch Sheets and Rename Views | Ran in Revit 2025: the sloped roof's opening was made |
+| 2.48.0 | Pipe Openings tags every opening with its pipe, host and settings; Model panel: Update Openings re-cuts openings whose pipe moved or changed size and lists those whose pipe is gone | Ran in Revit 2025: tags read back and two moved pipes found (1077 and 631 mm); the report crashed after the re-cut, asking a deleted opening for its Id |
+| 2.48.1 | Update Openings: each opening's Id kept from before it is deleted, so the report after a re-cut no longer crashes | Worked in Revit 2025, current |
 
 ## Licence
 

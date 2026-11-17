@@ -180,9 +180,10 @@ class Pipe(object):
     """A straight pipe or conduit, in the host model's coordinates."""
 
     def __init__(self, element, source, start, end, diameter, box,
-                 kind):
+                 kind, link_uid=u""):
         self.element = element
         self.source = source          # u"" for this model, else the link
+        self.link_uid = link_uid      # the link instance's UniqueId, or u""
         self.start = start
         self.end = end
         self.diameter = diameter      # outer, insulation included, feet
@@ -228,7 +229,7 @@ def pipe_diameter(DB, element, kind):
 CATEGORIES = (("OST_PipeCurves", u"Pipe"), ("OST_Conduit", u"Conduit"))
 
 
-def read_pipes(DB, doc, source=u"", transform=None):
+def read_pipes(DB, doc, source=u"", transform=None, link_uid=u""):
     """Every straight pipe and conduit in `doc`, moved by `transform`
     into the host model when `doc` is a link."""
     found = []
@@ -243,25 +244,33 @@ def read_pipes(DB, doc, source=u"", transform=None):
         except BaseException:
             continue
         for element in elements:
-            try:
-                curve = element.Location.Curve
-            except BaseException:
-                continue
-            if curve is None or not isinstance(curve, DB.Line):
-                continue
-            try:
-                start = curve.GetEndPoint(0)
-                end = curve.GetEndPoint(1)
-                if transform is not None:
-                    start = transform.OfPoint(start)
-                    end = transform.OfPoint(end)
-            except BaseException:
-                continue
-            diameter = pipe_diameter(DB, element, kind)
-            box = box_of_element(DB, element, transform)
-            found.append(Pipe(element, source, xyz(start), xyz(end),
-                              diameter, box, kind))
+            pipe = pipe_of(DB, element, kind, source, transform, link_uid)
+            if pipe is not None:
+                found.append(pipe)
     return found
+
+
+def pipe_of(DB, element, kind, source=u"", transform=None, link_uid=u""):
+    """One straight pipe or conduit as a Pipe in the host model's
+    coordinates, or None when it is not straight or has no line."""
+    try:
+        curve = element.Location.Curve
+    except BaseException:
+        return None
+    if curve is None or not isinstance(curve, DB.Line):
+        return None
+    try:
+        start = curve.GetEndPoint(0)
+        end = curve.GetEndPoint(1)
+        if transform is not None:
+            start = transform.OfPoint(start)
+            end = transform.OfPoint(end)
+    except BaseException:
+        return None
+    diameter = pipe_diameter(DB, element, kind)
+    box = box_of_element(DB, element, transform)
+    return Pipe(element, source, xyz(start), xyz(end), diameter, box, kind,
+                link_uid)
 
 
 def link_pipes(DB, doc):
@@ -288,7 +297,7 @@ def link_pipes(DB, doc):
         except BaseException:
             transform = None
         found.extend(read_pipes(DB, link_doc, to_text(link_doc.Title),
-                                transform))
+                                transform, to_text(instance.UniqueId)))
     return found, unloaded
 
 

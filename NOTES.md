@@ -2279,6 +2279,98 @@ Everything crossing into Revit, read from the API documentation only:
 MEP diameter and insulation parameters, `Face.Project` and
 `Face.ComputeNormal`, and the WPF settings window.
 
+## Update Openings and the tag (2.48.0)
+
+Pipe Openings writes a tag onto every opening it makes, and Update
+Openings reads it. Until 2.48.0 an opening knew nothing of the pipe it
+was cut for, so a moved pipe left a hole in the wrong place with no
+way to find it.
+
+### The tag
+
+`avh_openings.tags` builds and reads it: the pipe's and host's
+UniqueIds, the link instance's when the pipe is in a link, what kind of
+opening it is (`opening`, `shaft`, `round`), the shape and clearance,
+and the centre and size it was made at. Plain `key=value` lines, ASCII
+only, numbers written with `repr` so a decimal comma locale cannot
+reach them, and a version that a later format must change. Not JSON:
+IronPython's `json.dumps` raised on non-ASCII text in the Clash
+Detector, and nothing here needs it.
+
+`avh_openings.storage` keeps it in extensible storage, under a schema
+with a fixed GUID (`6f1c2a0e-...`), one string field, public access.
+It is read back after every write. A tag that will not go on is noted
+on that row of the Pipe Openings report ("not tagged, so Update
+Openings will not see it") and never costs the opening.
+
+### Checking without breaking
+
+A pipe running through its own opening does not meet the host's solid
+(that is how a second Pipe Openings run skips it), so the crossing
+cannot be measured with the opening there. Update Openings deletes each
+opening inside a transaction it always rolls back, measures on the
+whole host, sizes exactly as Pipe Openings does, and compares with the
+tag: the same within half a millimetre in the face and in size is
+unchanged. Depth is not compared, because it moves when a pipe tilts
+without the hole needing to.
+
+The re-cut deletes the old opening and makes the new one in the same
+transaction, through `avh_openings.writer`, which both buttons now
+share: it is the Pipe Openings code moved out of the script, with a
+`before` hook for that delete and an `after` hook for the tag. Every
+way of making an opening is tried in a transaction of its own, so the
+delete is redone with each try and undone with each refusal, and when
+Revit refuses them all the old opening is still there.
+
+Orphans are asked about in a question of their own that is only asked
+when there are some, and No keeps them.
+
+### The harness
+
+The fake document gained UniqueIds, extensible storage, and `Delete`
+that takes an opening's holes out of its hosts at once and puts them
+back on rollback. That last is the kind of state that outlives a
+transaction, which is the bug fakes like this have had most, so the
+unchanged scenario checks the model is exactly as it was after every
+check has deleted and rolled back. Scenarios cover a moved, resized
+and deleted pipe, a pipe moved off its host, a linked pipe unloaded and
+moved, a checked out opening, a re-cut Revit refuses, a selection, an
+untagged and an unreadable tag, a shaft through a sloped roof and a
+round wall opening following their pipes, a declined re-cut, storage
+that raises or silently keeps nothing, a re-cut that lands off the
+pipe, and a run Revit rolls back.
+
+Thirty-nine mutations, each caught. Two first crashed the harness
+rather than failing a check, by indexing an opening that was not
+there; `first` and `hole_at` turn that into a failed check, so a crash
+can no longer hide the checks after it. The mutation runner now also
+tells a crash from a mutation that is not valid Python, which an
+indentation slip in the runner itself had briefly passed off as caught.
+
+### The first Revit run (2.48.0 -> 2.48.1)
+
+The tags read back and both moved pipes were found, 1077 and 631 mm
+off, so the storage calls work. Then the report after the re-cut
+crashed: "The referenced object is not valid, possibly because it has
+been deleted from the database". It asked each old opening for its Id,
+and Revit refuses that once an element is deleted. The re-cut itself
+had already committed; only the report and the summary were lost.
+
+The harness had not seen it because its deleted openings still
+answered for their Id. Now `Element.Id` raises once an element is
+deleted, and recovers on rollback, as in Revit, and the harness failed
+seven checks until the script kept each opening's Id at the start
+(`Item.element_id`) and used only that after the first delete.
+
+**Never touch an element after deleting it, even to name it in a
+report.** Keep what the report needs before the delete.
+
+### Unverified
+
+The extensible storage calls in `avh_openings.storage`, including
+IronPython's `entity.Set[String]` generic call, and `Document.Delete`
+and `GetElement` by UniqueId, are from the API documentation only.
+
 ## Update AVH: measured, not trusted
 
 The button reuses pyRevit's own updater (`updater.update_repo`, which is

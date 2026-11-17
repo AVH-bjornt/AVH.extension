@@ -419,6 +419,81 @@ check("shaft levels: below every level uses the bottom one twice",
 check("shaft levels: no levels", model.shaft_levels([], 0.0, 1.0) is None)
 
 # --------------------------------------------------------------------------
+# Tags
+# --------------------------------------------------------------------------
+
+from avh_openings import tags  # noqa: E402
+
+made = settings(shape=model.RECTANGULAR, amount=25, round_to=10)
+opening, _ = model.size_opening((10.0, 5.0, 0.0), (10.0, 5.0, 250 * MM),
+                                110 * MM, floor, made)
+tag = tags.from_opening(opening, made, u"pipe-uid-1", u"link-uid-2",
+                        u"Pipe", u"host-uid-3", tags.OPENING)
+text = tag.encode()
+back = tags.decode(text)
+check("tag: encodes to plain ASCII", all(ord(c) < 127 for c in text), text)
+check("tag: reads back field for field",
+      back.__dict__ == tag.__dict__, (back.__dict__, tag.__dict__))
+check("tag: numbers survive exactly (repr, not a locale)",
+      back.cx == tag.cx and back.width == tag.width and
+      back.pipe_diameter == tag.pipe_diameter)
+check("tag: the settings come back", back.settings().shape ==
+      model.RECTANGULAR and back.settings().amount == 25.0)
+check("tag: the same opening is the same",
+      tags.same(back, opening))
+
+
+def moved(opening, du=0.0, dv=0.0, dw=0.0, grow=0.0):
+    u, v, w = opening.frame.local(opening.center)
+    return model.Opening(opening.shape, opening.frame,
+                         opening.frame.to_world(u + du, v + dv, w + dw),
+                         width=opening.width + grow,
+                         height=opening.height, diameter=opening.diameter)
+
+
+check("tag: 0.4 mm off is the same", tags.same(back, moved(opening, 0.4 * MM)))
+check("tag: 0.6 mm off is not", not tags.same(back, moved(opening, 0.6 * MM)))
+check("tag: 0.6 mm off the other way is not",
+      not tags.same(back, moved(opening, dv=-0.6 * MM)))
+check("tag: a different depth is still the same opening",
+      tags.same(back, moved(opening, dw=100 * MM)))
+check("tag: 1 mm wider is not the same",
+      not tags.same(back, moved(opening, grow=1 * MM)))
+circle = model.Opening(model.CIRCULAR, floor, opening.center,
+                       diameter=160 * MM)
+check("tag: a circle where a rectangle was is not the same",
+      not tags.same(back, circle))
+
+
+def refused(text):
+    try:
+        tags.decode(text)
+    except tags.TagError as exc:
+        return u"{0}".format(exc)
+    return None
+
+
+check("tag: another version is refused, and says so",
+      u"version 2" in (refused(text.replace(u"version=1", u"version=2"))
+                       or u""))
+check("tag: a missing field is refused",
+      refused(u"\n".join(line for line in text.split(u"\n")
+                         if not line.startswith(u"width="))))
+check("tag: a broken number is refused",
+      refused(text.replace(u"cx=", u"cx=abc")))
+check("tag: an unknown kind is refused",
+      refused(text.replace(u"kind=opening", u"kind=hole")))
+check("tag: nothing at all is refused", refused(u""))
+odd = tags.from_opening(opening, made, u"pipe\u00e6", u"", u"Pipe",
+                        u"host", tags.OPENING)
+try:
+    odd.encode()
+    stored = True
+except tags.TagError:
+    stored = False
+check("tag: will not store something that cannot read back", not stored)
+
+# --------------------------------------------------------------------------
 # The checks can fail
 # --------------------------------------------------------------------------
 
