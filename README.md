@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.49.1.** The authoritative number is `__version__` in
+**Version 2.50.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -264,17 +264,36 @@ becomes three walls, side by side exactly where the layers were. Each
 new wall gets a one layer type named after its material and thickness
 ("Gipsplata 12.5 mm"), reused if the model already has one with the
 same thickness, material and function, made by duplicating the wall's
-type if not. The new walls are copies of the original, so they keep
-its levels, constraints, height, phase and workset; the original is
-then deleted.
+type if not. The original wall becomes its core layer (the thickest
+layer in the core), so its doors and windows stay in it with their
+tags, marks and schedule rows. The other layers are copies of the
+original, keeping its levels, constraints, height, phase and workset,
+and are joined to the core: its doors and windows then cut through
+every layer, and keep doing so if they are moved or resized later.
+Wall openings made with the Opening tool do not cut through a join, so
+each is copied into every other layer; a copy does not follow the
+original if that is moved later. After the run every layer is checked,
+from its faces, for each door, window and opening cutting it, and any
+that does not is reported.
 
-Curtain and stacked walls, curved walls, walls with doors, windows or
-openings in them, walls in groups, pinned walls and walls with layers
-that change up their height are listed with the reason and left alone.
-Membrane layers are not made into walls. The list, and anything else
-deleting the originals would take with them (dimensions, tags), is
-shown before anything changes; a wall Revit refuses is left whole, and
-the whole run is one undo.
+Curtain and stacked walls, curved walls, walls with a wall opening that
+is not a rectangle or an embedded wall in them, walls in groups, pinned
+walls and walls with layers that change up their height are listed with
+the reason and left alone. Membrane layers are not made into walls.
+Dimensions to a face that moves as the wall narrows may be removed by
+Revit; they are counted before the question and any removed are listed
+after. A door too wide for the core makes Revit refuse that wall, which
+is left whole. The list is shown before anything changes, and the whole
+run is one undo.
+
+Shift-click splits each wall into three instead: every layer outside
+the core as one wall, the core as one, every layer inside it as one.
+A side of several layers gets a type of those layers in order, named
+after the wall's type ("Exterior - Brick on Mtl. Stud - exterior"),
+with its membranes kept in it; a side of one layer gets the same one
+layer type as a normal click. The original wall becomes the core part,
+and doors, windows, openings and the check after the run work as
+above. A wall with no core, or nothing thick outside it, is refused.
 
 **Point Cloud to Toposolid.** Pick a linked point cloud, a point
 spacing in metres, a toposolid type and a level. The cloud is read in
@@ -614,7 +633,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.48.0 | Pipe Openings tags every opening with its pipe, host and settings; Model panel: Update Openings re-cuts openings whose pipe moved or changed size and lists those whose pipe is gone | Ran in Revit 2025: tags read back and two moved pipes found (1077 and 631 mm); the report crashed after the re-cut, asking a deleted opening for its Id |
 | 2.48.1 | Update Openings: each opening's Id kept from before it is deleted, so the report after a re-cut no longer crashes | Worked in Revit 2025 |
 | 2.49.0 | Model panel: Split Wall Layers, one wall per layer of each selected wall's structure, each with a one layer type | Ran in Revit: a plain wall refused as "its layers change up its height", under an empty table |
-| 2.49.1 | Split Wall Layers: layers that change up a wall found with `IsVerticallyHomogeneous()`, not `IsVerticallyCompound`; the refusal names what Revit said; no empty table when every wall is refused | Worked in Revit, current |
+| 2.49.1 | Split Wall Layers: layers that change up a wall found with `IsVerticallyHomogeneous()`, not `IsVerticallyCompound`; the refusal names what Revit said; no empty table when every wall is refused | Worked in Revit |
+| 2.50.0 | Split Wall Layers splits walls with doors, windows and wall openings: the original becomes the core layer and keeps them, the other layers are joined to it so doors and windows cut them, wall openings are copied into each layer, and every layer is checked for its cuts after the run. Shift-click splits into three walls: exterior layers, core, interior layers | Measured first with a probe button in Revit 2025; not yet run as a release, current |
 
 ## Licence
 

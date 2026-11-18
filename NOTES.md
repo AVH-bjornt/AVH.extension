@@ -2401,10 +2401,8 @@ with code of its own, and the main check is that the new walls tile
 the original's layers exactly. A check that compared the new curves
 with `model.shifts` would only be the script agreeing with itself.
 
-**Doors and windows are refused, not moved.** Which layer a door
-belongs to, and what the other layers need where it was, is a design
-decision. Splitting such a wall by hand is the honest answer until
-someone decides.
+**Doors and windows were refused in 2.49, not moved.** See 2.50.0
+below for how they are split now.
 
 **The first Revit run (2.49.0 -> 2.49.1).** A plain partition was
 refused: "its layers change up its height". 2.49.0 asked
@@ -2436,6 +2434,119 @@ finish or insulation layer, `Wall.FindInserts`, `Wall.Orientation` on
 a flipped wall, and how the new walls join their neighbours once the
 original is gone. Every new wall keeps the original's structural flag,
 gypsum included.
+
+## Split Wall Layers: doors, windows and openings (2.50.0)
+
+**The original becomes the core.** Deleting it and placing new doors
+would lose every door's id, and with it its tags, marks and schedule
+rows; Revit's API cannot move a door to another wall. So the original
+is kept as the thickest layer inside the core (`model.core_layer`), the
+doors stay in it, and only the other layers are copies.
+
+**Measured before it was built**, with a throwaway Probe Wall Joins
+button that did the split in a transaction group, measured, and rolled
+back. Three runs in Revit 2025:
+
+1. "Can't make type M_Door-Passage-Double-Flush" twice and nothing
+   kept. `CopyElement` on a wall copies its doors with it but returns
+   only the wall, so the probe never deleted them, and Revit could not
+   build a 1800 mm door in a 12.5 mm gypsum copy. Asking the copy for
+   its inserts (`FindInserts` after `Regenerate`) finds them.
+2. A 16 / 93 / 16 partition with a door: after `JoinGeometryUtils.
+   JoinGeometry` with the core both gypsum walls were cut, their
+   volume down by 16 mm times the door's opening. The door stayed in
+   its wall and did not move.
+3. An exterior wall, brick 92 / air 75 / membrane / plywood 19.5 /
+   stud 150 core / membrane / gypsum 12.5, located by its centreline so
+   the core is 87 mm off it, with a double door, a fixed window and a
+   rectangular wall opening. Every layer joined straight to the core,
+   including the brick 94.5 mm away from it, was cut by the door and
+   the window, with no warning. Joining neighbours as well, or
+   switching the join order, changed nothing. The wall opening cut only
+   the core, whatever was joined. The door and window moved -87 mm
+   across with their wall and nothing along it.
+
+So doors and windows are cut through joins, and wall openings are
+copied into each layer with `NewOpening` (the call Pipe Openings uses),
+their `BoundaryRect` moved across by the layer's shift. A wall opening
+that is not a rectangle, or anything in a wall other than a family
+instance or a wall opening (an embedded curtain wall), is refused.
+
+**The check after the run reads faces.** For every layer wall: is it
+joined to the core, was a copied door left in it, and did each door,
+window and opening make a face of its solid
+(`GetGeneratingElementIds`)? The probe showed that the face check and
+the volume agree. Geometry that cannot be read is reported as not
+checked, never as passed.
+
+**Dimensions are looked for after the run.** The original is no longer
+deleted, but a dimension to a face that moves can be. Everything that
+deleting the wall would take, less its own doors, windows and
+openings, is counted before the question, and any gone afterwards is
+listed.
+
+**The fake.** Doors, windows and wall openings hosted in a wall; a copy
+that carries them but returns the wall alone; joins kept in the
+transaction snapshot (one left outside it would outlive a rollback);
+faces made by the wall's own inserts and by the doors and windows of
+the walls joined to it, not their openings; "Can't make type" when a
+door sits in a wall thinner than it needs; and dimensions on a face
+removed when the face moves.
+
+Mutations, each failing the suite: copied doors found only from what
+`CopyElement` returned (5), no joins (11), openings not copied (2), an
+opening not moved to its layer (1), the core as the first layer (9),
+the core range ignored (2), no cut check (2), no joined check (1), no
+check for a copied door left behind (1), a refused join ignored (1),
+removed dimensions not looked for (1), doors counted as on the wall
+(1), unreadable geometry taken as no cuts (1), a non-rectangular
+opening accepted (11), an embedded wall accepted (4). Two survive and
+are expected to: doing the core before the copies (the curves are set
+absolutely, so the order does not matter) and dropping `Regenerate`,
+which the fake cannot model; the probe regenerated.
+
+Unverified until the release is run: a round AVH pipe opening (a
+family instance, so it should cut through joins like a door), a door
+whose family sizes its frame to the wall's thickness, and walls joined
+at their ends to neighbours.
+
+### Shift-click: exterior, core, interior
+
+Shift-click (`EXEC_PARAMS.config_mode`, or the older `__shiftclick__`,
+as in Clash Detector) groups the layers by the core boundaries instead
+of splitting every one: `model.parts` returns up to three `Part`s,
+which stand in for a `Layer` wherever the script only needs a width,
+an index and a shift, so copying, joining, opening copies and the check
+after the run are the same code. `model.part_shift` puts each part's
+centre where its layers were.
+
+A part of several layers gets a type from
+`CompoundStructure.CreateSimpleCompoundStructure` with every layer made
+core (`SetNumberOfShellLayers` 0 on both sides): what core the simple
+structure starts with is not documented, so it is set rather than
+assumed, and a side split off to stand alone has no shell of its own.
+The location line is set to the centreline anyway, so the core only
+matters for joins and dimensions to core faces later. Membranes stay
+inside their part's type, so in this mode only a side made of nothing
+but membranes is left out. A part of one layer is keyed and named as a
+one layer type, so it shares types with a normal click. Existing types
+are now matched layer by layer whatever their count
+(`model.structure_key`), so a second run reuses the part types the
+first made; core boundaries, wrapping and function priority are not
+compared.
+
+Mutations, failing checks: shells not set (1), the location line offset
+ignored (2), a part measured from its last layer (2), Shift never read
+(7) or not passed to `read_wall` (7), part types keyed by their first
+layer (1), a side of membranes made into a wall (1), only one layer
+types matched (1), a part named as a layer (3), an all core wall
+accepted (2). One survives and is expected to: a one layer part built
+through `CreateSimpleCompoundStructure` gives the same type.
+
+Unverified in Revit: whether `CreateSimpleCompoundStructure` accepts a
+membrane as the first or last layer of a structure that is all core.
+If Revit refuses, the types transaction fails, nothing changes, and
+"The wall types could not be made" names Revit's reason.
 
 ## Update AVH: measured, not trusted
 

@@ -171,6 +171,107 @@ def type_key(layer):
             layer.function)
 
 
+def core_layer(made, first_core, last_core):
+    """The layer the original wall becomes, keeping its doors, windows
+    and openings: the thickest of `made` inside the core, or the
+    thickest of all when no core layer has a thickness. The first wins
+    a tie, so the choice does not depend on anything but the layers."""
+    inside = [layer for layer in made
+              if first_core is not None and last_core is not None and
+              first_core <= layer.index <= last_core]
+    best = None
+    for layer in inside or made:
+        if best is None or layer.width > best.width + SAME_WIDTH:
+            best = layer
+    return best
+
+
+class Part(object):
+    """Neighbouring layers that become one wall, for the Shift-click
+    split: every layer outside the core, the core, every layer inside
+    it. Reads like a Layer where the script only needs a width and an
+    index; `layers` says what its type is made of."""
+
+    SIDES = (u"Exterior", u"Core", u"Interior")
+
+    def __init__(self, side, layers):
+        self.side = side
+        self.layers = list(layers)
+        self.index = self.layers[0].index
+        self.width = total(layer.width for layer in self.layers)
+        self.material_key = None
+        self.function = u""
+        thick = [type_name(layer) for layer in self.layers
+                 if not layer.is_membrane]
+        thin = len(self.layers) - len(thick)
+        if thin:
+            thick.append(u"{0} membrane(s)".format(thin))
+        self.material_name = u" + ".join(thick)
+
+    @property
+    def is_membrane(self):
+        return self.width < MIN_WIDTH
+
+
+def layers_of(layer):
+    """The layers a row's wall type is made of: a Part's, or the one."""
+    return list(getattr(layer, "layers", None) or [layer])
+
+
+def structure_key(layers):
+    """What makes two wall types interchangeable, layer by layer, in
+    order. One layer keys as type_key, so a part of one layer reuses the
+    same type a one layer split would."""
+    if len(layers) == 1:
+        return type_key(layers[0])
+    return tuple(type_key(layer) for layer in layers)
+
+
+def part_type_name(layer, wall_type_name):
+    """u"Gypsum 12.5 mm" for one layer, u"<wall type> - exterior" for a
+    part of several."""
+    layers = layers_of(layer)
+    if len(layers) == 1:
+        return type_name(layers[0])
+    return u"{0} - {1}".format(to_text(wall_type_name).strip() or u"Wall",
+                               layer.side.lower())
+
+
+def parts(layers, first_core, last_core):
+    """(to make, membranes) for the Shift-click split: up to three
+    Parts, exterior first. A side with no thickness is not made, and its
+    membranes are returned. Raises Refusal when there is no core, or
+    when fewer than two parts have a thickness."""
+    if first_core is None or last_core is None or first_core < 0 or \
+            last_core < first_core or last_core >= len(layers):
+        raise Refusal(u"its structure has no core to split the exterior "
+                      u"and interior layers from")
+    groups = (layers[:first_core], layers[first_core:last_core + 1],
+              layers[last_core + 1:])
+    made = []
+    thin = []
+    for side, group in zip(Part.SIDES, groups):
+        if not group:
+            continue
+        part = Part(side, group)
+        if part.is_membrane:
+            thin.extend(group)
+        else:
+            made.append(part)
+    if len(made) < 2:
+        raise Refusal(u"it has no layers with a thickness outside its "
+                      u"core")
+    return made, thin
+
+
+def part_shift(widths, part, offset):
+    """How far to move from the original curve to the part's centre,
+    along Orientation, given the location line's `offset`."""
+    exterior = total(widths) / 2.0 - total(widths[:part.layers[0].index])
+    centre = exterior - part.width / 2.0
+    return centre - offset
+
+
 def wall_layers(layers):
     """(to make, membranes): the layers that become walls, and the ones
     too thin to. Raises Refusal when fewer than two have a thickness,
