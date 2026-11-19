@@ -53,3 +53,34 @@ def label(sheet_number, sheet_name, view_name):
     return u"{0}  {1}  /  {2}".format(to_text(sheet_number),
                                       to_text(sheet_name),
                                       to_text(view_name))
+
+
+# --------------------------------------------------------------------------
+# Viewport titles (Align Titles)
+# --------------------------------------------------------------------------
+#
+# Revit 2022 gave the viewport title two settings: `Viewport.LabelOffset`,
+# where the title sits relative to the viewport, and `LabelLineLength`,
+# the length of the line under it. What LabelOffset is measured from is
+# not used here: the script reads where the title actually is on the
+# sheet (`GetLabelOutline`), moves the offset by the difference, and
+# reads it back. So only the direction of the offset is assumed, that
+# adding to it moves the title the same way on the sheet.
+
+def title_corner(minimum):
+    """(x, y) of a title's bottom left on the sheet, from the minimum
+    point of its outline. A title is left aligned, so its bottom left
+    stays put when the view name or the line length changes."""
+    if minimum is None:
+        return None
+    return (minimum[0], minimum[1])
+
+
+def new_offset(offset, current, wanted):
+    """The title offset that moves a title from `current` to `wanted`."""
+    return (offset[0] + wanted[0] - current[0],
+            offset[1] + wanted[1] - current[1])
+
+
+def same_length(a, b, tolerance=TOLERANCE_FT):
+    return a is not None and b is not None and abs(a - b) <= tolerance

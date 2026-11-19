@@ -148,7 +148,7 @@ a name another view of the same type already has. Sheets are renamed by
 name; their numbers are left alone. Names can be swapped among the
 chosen. If Revit refuses any rename, nothing is renamed.
 
-**Align Views.** Lines up views on different sheets. Select a
+**Align Views** (under **Align**). Lines up views on different sheets. Select a
 viewport on a sheet (or pick a placed view from a list if nothing is
 selected), then tick the views to line up with it. Each ticked viewport
 is moved on its sheet so that the top left corner of its view's crop
@@ -159,6 +159,22 @@ use the top left of all of them together. Pinned viewports and views
 with the crop region off are skipped and listed. After moving, every
 corner is worked out again and compared; if any is more than 0.1 mm out,
 nothing is moved. Needs Revit 2023 or newer.
+
+**Align Titles** (under **Align**). Lines up view titles on different
+sheets, the way Align Views lines up the drawings. Select a viewport (or
+pick one from the list), choose **Position and line length** or
+**Position only**, then tick the views whose titles should follow. Each
+ticked title is moved so that its bottom left lands at the same point on
+its sheet as the chosen title's, and with the first choice its line is
+given the same length. Switch on **Match viewport type** in the same
+dialog to give the ticked viewports the chosen one's viewport type first,
+so the title family, extension line and Show Title setting match too; a
+title hidden by its old type is then shown and aligned. The title's real place is read from Revit rather
+than copying the chosen title's offset, because that offset is measured
+from the viewport box, which grid heads and tags make bigger. Pinned
+viewports and viewport types with the title switched off are skipped and
+listed. Every title is read back after the change; if any is more than
+0.1 mm out, nothing is changed.
 
 **Hide Across Views** (under **Hide**). Hides or unhides the selected
 elements in views you pick. Shift click to work on their categories instead.
@@ -639,7 +655,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.49.0 | Model panel: Split Wall Layers, one wall per layer of each selected wall's structure, each with a one layer type | Ran in Revit: a plain wall refused as "its layers change up its height", under an empty table |
 | 2.49.1 | Split Wall Layers: layers that change up a wall found with `IsVerticallyHomogeneous()`, not `IsVerticallyCompound`; the refusal names what Revit said; no empty table when every wall is refused | Worked in Revit |
 | 2.50.0 | Split Wall Layers splits walls with doors, windows and wall openings: the original becomes the core layer and keeps them, the other layers are joined to it so doors and windows cut them, wall openings are copied into each layer, and every layer is checked for its cuts after the run. Shift-click splits into three walls: exterior layers, core, interior layers | Measured first with a probe button in Revit 2025; not yet run as a release |
-| 2.51.0 | Batch Sheets: the sheet names can be numbered from a start value like the sheet numbers, and the sheets can go into an existing or a new sheet collection | Ran in Revit 2025; current |
+| 2.51.0 | Batch Sheets: the sheet names can be numbered from a start value like the sheet numbers, and the sheets can go into an existing or a new sheet collection | Ran in Revit 2025 |
+| 2.52.0 | Align Titles: view titles on other sheets lined up with one chosen title, at the same point on the sheet and optionally with the same line length and viewport type. Align Views and Align Titles share an **Align** pulldown in the Sheets stack | Ran in Revit 2025, with and without the viewport type switch; current |
 
 ## Licence
 

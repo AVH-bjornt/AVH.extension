@@ -1052,7 +1052,9 @@ AVH.extension/
       Sheets.stack/
         Batch Sheets.pushbutton/
         Rename Views.pushbutton/
-        Align Views.pushbutton/
+        Align.pulldown/
+          Align Views.pushbutton/
+          Align Titles.pushbutton/
       Visibility.stack/
         Hide.pulldown/
           Hide Across Views.pushbutton/
@@ -2547,6 +2549,71 @@ Unverified in Revit: whether `CreateSimpleCompoundStructure` accepts a
 membrane as the first or last layer of a structure that is all core.
 If Revit refuses, the types transaction fails, nothing changes, and
 "The wall types could not be made" names Revit's reason.
+
+## Align Titles (2.52.0)
+
+Asked for as a companion to Align Views: choose one viewport title and
+put the titles on other sheets at the same point on the sheet, with the
+same title line length if wanted.
+
+### Measured, not computed from the offset
+
+`Viewport.LabelOffset` (Revit 2022) is relative to the viewport box, and
+the box grows with grid heads, tags and dimensions past the crop. In the
+sheet that prompted this, the title sat left of the crop frame because
+the grid heads stuck out to the left. Copying one viewport's offset to
+another therefore puts the titles in different places. The script reads
+each title's real bottom left from `GetLabelOutline().MinimumPoint`,
+moves the offset by the difference, regenerates, and reads it back. The
+only assumption is that adding to the offset moves the title the same
+way on the sheet. The harness hides a private amount inside each fake
+viewport so a script that assumed more fails.
+
+Bottom left, because a title is left aligned: its left edge and baseline
+stay put when the view name or the line length changes.
+
+Line lengths are set first, then the document is regenerated, then the
+offsets are worked out from fresh outlines, in case a longer line moves
+the outline's minimum.
+
+### Match viewport type
+
+A switch in the mode dialog (`CommandSwitchWindow` with `switches`,
+which then returns `(option, {switch: bool})`; a closed window is
+handled whether it comes back as `None` or `(None, {...})`). When on,
+each target gets the source's type through `ChangeTypeId` before
+anything is measured, and the document is regenerated, because another
+title family moves the title's outline. A target whose old type hides
+the title is therefore not skipped. Viewports already of that type are
+not touched. The readback checks the type as well as the place.
+
+Mutations: not changing the type, 5 checks fail; checking for a hidden
+title before the change, 3; switch always on, 3; no type readback, 1;
+changing a type that already matches, 1; no regenerate after the type
+change, 1 (only once a Position only case was added: the line step's
+regenerate hid it).
+
+### Layout
+
+The Sheets stack was full (three items), so Align Views moved into an
+`Align.pulldown` with Align Titles. Restart Revit after updating rather
+than reloading pyRevit: the old Align Views button is still on the
+ribbon until then.
+
+### What the mutations proved
+
+Using the source's corner as the offset: 9 checks fail. Not setting the
+line: 7. No regenerate before the readback: 9. Ignoring pinned: 3.
+Ignoring the commit status: 1. Ignoring a hidden title: 1.
+
+### Unverified
+
+Position, line length and the viewport type switch ran in Revit 2025
+and worked. Not yet seen in Revit: whether a viewport type with Show Title = No
+still gives an outline, and whether `VIEWPORT_ATTR_SHOW_LABEL` is the
+Show Title parameter with 0 for No.
+Each of these shows up as a skipped or "did not land" row rather than
+a false success.
 
 ## Update AVH: measured, not trusted
 
