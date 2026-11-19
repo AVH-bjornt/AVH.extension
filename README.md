@@ -639,7 +639,7 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.49.0 | Model panel: Split Wall Layers, one wall per layer of each selected wall's structure, each with a one layer type | Ran in Revit: a plain wall refused as "its layers change up its height", under an empty table |
 | 2.49.1 | Split Wall Layers: layers that change up a wall found with `IsVerticallyHomogeneous()`, not `IsVerticallyCompound`; the refusal names what Revit said; no empty table when every wall is refused | Worked in Revit |
 | 2.50.0 | Split Wall Layers splits walls with doors, windows and wall openings: the original becomes the core layer and keeps them, the other layers are joined to it so doors and windows cut them, wall openings are copied into each layer, and every layer is checked for its cuts after the run. Shift-click splits into three walls: exterior layers, core, interior layers | Measured first with a probe button in Revit 2025; not yet run as a release |
-| 2.51.0 | Batch Sheets: the sheet names can be numbered from a start value like the sheet numbers, and the sheets can go into an existing or a new sheet collection | Not yet run in Revit; current |
+| 2.51.0 | Batch Sheets: the sheet names can be numbered from a start value like the sheet numbers, and the sheets can go into an existing or a new sheet collection | Ran in Revit 2025; current |
 
 ## Licence
 
