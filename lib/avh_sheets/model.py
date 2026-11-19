@@ -114,6 +114,42 @@ def number_fields(count, start):
     return naming.numbers(count, start)
 
 
+def fields(count, start, typed, fill):
+    """The fields for `count` rows: counting up from `start` when it is
+    something to count from (1, 01, 101 or a single letter), otherwise
+    the fields typed so far, cut or padded with `fill`. Used alike for
+    the number fields and the name fields."""
+    counted = naming.numbers(count, start)
+    if counted is not None:
+        return counted
+    return resize(typed, count, fill)
+
+
+def counts_from(start):
+    """Whether `start` is something rows can be numbered from."""
+    return naming.numbers(1, start) is not None
+
+
+def collection_problem(name, existing_names):
+    """Why a new sheet collection cannot be called `name`, or u"".
+
+    Whether Revit requires collection names to be unique, and whether it
+    compares them ignoring case, is not confirmed; refusing a name that
+    matches an existing one ignoring case can only refuse more than Revit
+    would, and a new collection beside an old one of the same name would
+    be confusing in the Project Browser anyway."""
+    name = to_text(name).strip()
+    if not name:
+        return u"type a name for the new sheet collection"
+    problem = naming.problem(name)
+    if problem:
+        return problem
+    if name.lower() in set(to_text(n).strip().lower()
+                           for n in existing_names):
+        return u"a sheet collection already has this name"
+    return u""
+
+
 def resize(values, count, fill):
     """`values` cut or padded to `count`, padding with `fill`."""
     values = list(values)[:count]

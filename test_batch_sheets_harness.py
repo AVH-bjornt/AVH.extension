@@ -20,6 +20,7 @@ Run outside Revit:
     python test_batch_sheets_harness.py
 """
 
+import io
 import os
 import runpy
 import sys
@@ -85,6 +86,24 @@ class FakeTitleBlock(object):
         return self.type_id
 
 
+class FakeSheetCollection(object):
+    created = 0
+
+    def __init__(self, doc, name):
+        FakeSheetCollection.created += 1
+        self.Id = FakeId(5000 + FakeSheetCollection.created)
+        self.Name = name
+        doc.collections.append(self)
+
+    @staticmethod
+    def Create(doc, name):
+        if any(c in name for c in naming.FORBIDDEN):
+            raise Exception("Name contains prohibited characters")
+        if any(c.Name.lower() == name.lower() for c in doc.collections):
+            raise Exception("Sheet collection name is already in use")
+        return FakeSheetCollection(doc, name)
+
+
 class FakeViewSheet(object):
     created = 0
 
@@ -95,6 +114,7 @@ class FakeViewSheet(object):
         self._number = number
         self._name = name
         self.type_id = type_id
+        self._collection = INVALID
         doc.sheets.append(self)
 
     @staticmethod
@@ -122,6 +142,18 @@ class FakeViewSheet(object):
         self._number = number.upper() if self.doc.mangle else number
 
     @property
+    def SheetCollectionId(self):
+        return self._collection
+
+    @SheetCollectionId.setter
+    def SheetCollectionId(self, collection_id):
+        if collection_id != INVALID and not any(
+                c.Id == collection_id for c in self.doc.collections):
+            raise Exception("Not a sheet collection")
+        if not self.doc.ignore_collection:
+            self._collection = collection_id
+
+    @property
     def Name(self):
         return self._name
 
@@ -134,8 +166,12 @@ class FakeViewSheet(object):
 
 class FakeDoc(object):
     def __init__(self, commit_status="Committed", family=False,
-                 refuse=(), mangle=False):
+                 refuse=(), mangle=False, has_collections=True,
+                 ignore_collection=False):
         self.sheets = []
+        self.collections = []
+        self.has_collections = has_collections
+        self.ignore_collection = ignore_collection
         self.symbols = []
         self.placed = []
         self.commit_status = commit_status
@@ -161,15 +197,19 @@ class FakeTransaction(object):
 
     def Start(self):
         self.saved = (list(self.doc.sheets),
-                      [(s, s._number, s._name) for s in self.doc.sheets],
-                      [(s, s.IsActive) for s in self.doc.symbols])
+                      [(s, s._number, s._name, s._collection)
+                       for s in self.doc.sheets],
+                      [(s, s.IsActive) for s in self.doc.symbols],
+                      list(self.doc.collections))
         self.doc.log.append("start")
 
     def RollBack(self):
-        sheets, values, symbols = self.saved
+        sheets, values, symbols, collections = self.saved
         self.doc.sheets[:] = sheets
-        for sheet, number, name in values:
+        self.doc.collections[:] = collections
+        for sheet, number, name, collection in values:
             sheet._number, sheet._name = number, name
+            sheet._collection = collection
         for symbol, active in symbols:
             symbol.IsActive = active
         self.doc.log.append("rollback")
@@ -197,6 +237,8 @@ class FakeCollector(object):
         return iter(list(self.doc.placed))
 
     def OfClass(self, cls):
+        if cls is FakeSheetCollection:
+            return iter(list(self.doc.collections))
         return iter(list(self.doc.sheets))
 
 
@@ -210,9 +252,10 @@ class Recorder(object):
         self.printed = []
         self.window = None
 
-    def ask(self, labels, chosen, number, count, evaluate):
+    def ask(self, labels, chosen, number, count, evaluate, collections):
         self.window = Namespace(labels=labels, chosen=chosen, number=number,
-                                count=count, evaluate=evaluate)
+                                count=count, evaluate=evaluate,
+                                collections=collections)
         if self.answer is None:
             return None
         return self.answer(labels, chosen, number, count, evaluate)
@@ -237,6 +280,8 @@ def run_script(doc, recorder):
         Transaction=FakeTransaction,
         TransactionStatus=Namespace(Committed="Committed"),
     )
+    if doc.has_collections:
+        db.SheetCollection = FakeSheetCollection
     pyrevit = types.ModuleType("pyrevit")
     pyrevit.revit = Namespace(doc=doc)
     pyrevit.DB = db
@@ -265,7 +310,7 @@ def run_script(doc, recorder):
 
 def batch(count, start=None, names=None, titleblock=None,
           number_prefix=None, number_suffix=None,
-          name_prefix=u"", name_suffix=u""):
+          name_prefix=u"", name_suffix=u"", collection=None):
     """A person who keeps the suggested numbering unless told otherwise."""
     def answer(labels, chosen, number, _count, evaluate):
         fields = naming.numbers(count, start or number[1])
@@ -276,7 +321,8 @@ def batch(count, start=None, names=None, titleblock=None,
                     number[2] if number_suffix is None else number_suffix,
                     name_prefix,
                     names or [u"Unnamed"] * count,
-                    name_suffix))
+                    name_suffix),
+            collection=collection)
     return answer
 
 
@@ -335,6 +381,37 @@ check("plan: names may repeat and carry Icelandic",
 check("resize: pads and cuts",
       model.resize([u"a", u"b"], 3, u"z") == [u"a", u"b", u"z"] and
       model.resize([u"a", u"b"], 1, u"z") == [u"a"])
+check("fields: a start value numbers the names like the numbers",
+      model.fields(3, u"1", [u"x"], u"Unnamed") == [u"1", u"2", u"3"] and
+      model.fields(2, u"01", [], u"Unnamed") == [u"01", u"02"] and
+      model.fields(2, u"A", [], u"Unnamed") == [u"A", u"B"])
+check("fields: no start value keeps what was typed, padded",
+      model.fields(3, u"", [u"Snid A", u"Snid B"], u"Unnamed") ==
+      [u"Snid A", u"Snid B", u"Unnamed"])
+check("fields: a start that cannot count keeps what was typed",
+      model.fields(2, u"Grunnmynd", [u"a", u"b", u"c"], u"Unnamed") ==
+      [u"a", u"b"])
+check("counts_from: numbers and single letters only",
+      model.counts_from(u"1") and model.counts_from(u"A") and
+      not model.counts_from(u"") and not model.counts_from(u"1a"))
+rows = model.plan(u"A-", model.fields(3, u"101", [], u""), u"",
+                  u"Grunnmynd ", model.fields(3, u"1", [], u"Unnamed"),
+                  u". " + HAED)
+check("plan: numbered names come out in order",
+      [r.name for r in rows] == [u"Grunnmynd 1. " + HAED,
+                                 u"Grunnmynd 2. " + HAED,
+                                 u"Grunnmynd 3. " + HAED] and
+      not model.blocking(rows), [r.name for r in rows])
+
+# The window cannot run here; check its source wires the name start up the
+# same way as the number start.
+WINDOW_SRC = io.open(os.path.join(HERE, "lib", "avh_sheets", "window.py"),
+                     encoding="utf-8").read()
+check("window: a name start box, renumbering on change like the number's",
+      u'x:Name="name_start_box"' in WINDOW_SRC and
+      u"self.name_start_box.TextChanged += self.on_start" in WINDOW_SRC)
+check("window: name fields come from model.fields with the name start",
+      u"model.fields(count, to_text(self.name_start_box.Text)" in WINDOW_SRC)
 
 
 # --------------------------------------------------------------------------
@@ -445,6 +522,66 @@ doc, a1, a3 = model_with_sheets()
 rec = run_script(doc, Recorder(batch(1, names=[u"Snid; A"])))
 check("forbidden: refused before Revit is asked",
       doc.log == [] and u";" in rec.text(), rec.text())
+
+# 10. Sheet collections.
+check("collection rule: empty, forbidden, taken ignoring case, fine",
+      model.collection_problem(u"  ", []) and
+      model.collection_problem(u"A;B", []) and
+      u"already" in model.collection_problem(u"utbod", [u"Utbod"]) and
+      model.collection_problem(u"Utbo" + u"ð", [u"Utbod"]) == u"")
+
+doc, a1, a3 = model_with_sheets()
+FakeSheetCollection(doc, u"Verkteikningar")
+FakeSheetCollection(doc, u"Aðalteikningar")
+rec = run_script(doc, Recorder(batch(2, collection=(u"existing", 1))))
+check("collection: the model's collections offered, sorted",
+      rec.window and rec.window.collections == [u"Aðalteikningar",
+                                                u"Verkteikningar"],
+      rec.window and rec.window.collections)
+new = [sh for sh in doc.sheets if sh._number in (u"A-902", u"A-903")]
+check("collection: an existing one gets every new sheet",
+      len(new) == 2 and all(sh._collection == doc.collections[0].Id
+                            for sh in new),
+      [sh._collection.Value for sh in new])
+check("collection: older sheets are left where they were",
+      all(sh._collection == INVALID for sh in doc.sheets if sh not in new))
+check("collection: named in the report",
+      u"Verkteikningar" in rec.text(), rec.text())
+
+doc, a1, a3 = model_with_sheets()
+rec = run_script(doc, Recorder(batch(2, collection=(u"new", u"Útboð"))))
+made = [c for c in doc.collections if c.Name == u"Útboð"]
+check("collection: a new one is made and gets the sheets",
+      len(made) == 1 and sum(1 for sh in doc.sheets
+                             if sh._collection == made[0].Id) == 2,
+      [c.Name for c in doc.collections])
+
+doc, a1, a3 = model_with_sheets()
+FakeSheetCollection(doc, u"Útboð")
+before = doc.numbers()
+rec = run_script(doc, Recorder(batch(1, collection=(u"new", u"útboð"))))
+check("collection: a new name another collection has is refused first",
+      doc.log == [] and doc.numbers() == before and len(doc.collections) == 1
+      and u"already" in rec.text(), rec.text())
+
+doc, a1, a3 = model_with_sheets(refuse=[u"A-903"])
+rec = run_script(doc, Recorder(batch(2, collection=(u"new", u"Útboð"))))
+check("collection: Revit refusing a sheet undoes the new collection too",
+      doc.collections == [] and u"A-903" in rec.text() and
+      doc.numbers() == [u"A-101", u"A-102", u"A-9", u"A-901"],
+      (rec.text(), [c.Name for c in doc.collections]))
+
+doc, a1, a3 = model_with_sheets(ignore_collection=True)
+rec = run_script(doc, Recorder(batch(1, collection=(u"new", u"Útboð"))))
+check("collection: a set Revit ignores is caught on read back",
+      u"did not go into" in rec.text() and doc.collections == [] and
+      len(doc.numbers()) == 4, rec.text())
+
+doc, a1, a3 = model_with_sheets(has_collections=False)
+rec = run_script(doc, Recorder(batch(1)))
+check("collection: a Revit without them offers none and still makes sheets",
+      rec.window and rec.window.collections is None and
+      len(doc.numbers()) == 5, rec.text())
 
 # --------------------------------------------------------------------------
 

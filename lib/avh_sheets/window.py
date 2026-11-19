@@ -7,8 +7,15 @@ number field and name field, editable, and the sheet number and name it
 will get, kept up to date as you type and shown in red with the reason
 when Revit would refuse it.
 
-Changing the count or the number to start from renumbers the rows;
-name fields typed so far are kept.
+The name can be numbered the same way: give the name a start value
+(1, 01, 101 or a letter) and the name fields count up from it. Left
+empty, the name fields are typed per row. Changing the count or a start
+value renumbers the rows; fields that are not numbered keep what was
+typed in them.
+
+The sheets can go into a sheet collection: none, one already in the
+model, or a new one named here. A new collection's name is checked as
+you type like the sheet names are.
 
 Revit and WPF only, so nothing here runs outside Revit and the test
 harness puts a stand in for this module. What it shows comes from
@@ -57,6 +64,20 @@ XAML = u"""
                  VerticalAlignment="Center"/>
       <TextBox Grid.Column="3" x:Name="count_box" Padding="3"/>
     </Grid>
+    <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="110"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" Text="Sheet collection"
+                 VerticalAlignment="Center"/>
+      <ComboBox Grid.Column="1" x:Name="collection_box" Padding="3"/>
+      <TextBlock Grid.Column="2" Text="new collection name"
+                 Margin="12,0,6,0" VerticalAlignment="Center"/>
+      <TextBox Grid.Column="3" x:Name="new_collection_box" Padding="3"/>
+    </Grid>
     <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="110"/>
@@ -81,14 +102,20 @@ XAML = u"""
         <ColumnDefinition Width="110"/>
         <ColumnDefinition Width="*"/>
         <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="70"/>
+        <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="*"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Name prefix"
                  VerticalAlignment="Center"/>
       <TextBox Grid.Column="1" x:Name="name_prefix_box" Padding="3"/>
-      <TextBlock Grid.Column="2" Text="suffix" Margin="12,0,6,0"
+      <TextBlock Grid.Column="2" Text="start at" Margin="12,0,6,0"
                  VerticalAlignment="Center"/>
-      <TextBox Grid.Column="3" x:Name="name_suffix_box" Padding="3"/>
+      <TextBox Grid.Column="3" x:Name="name_start_box" Padding="3"
+               ToolTip="Leave empty to type each name; 1, 01, 101 or a letter numbers them"/>
+      <TextBlock Grid.Column="4" Text="suffix" Margin="12,0,6,0"
+                 VerticalAlignment="Center"/>
+      <TextBox Grid.Column="5" x:Name="name_suffix_box" Padding="3"/>
     </Grid>
     <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
       <Button x:Name="cancel_button" DockPanel.Dock="Right"
@@ -111,17 +138,34 @@ HEADINGS = (u"Number field", u"Sheet number", u"Name field", u"Sheet name")
 WIDTHS = ((0.7, GridUnitType.Star), (1, GridUnitType.Star),
           (1.2, GridUnitType.Star), (1.6, GridUnitType.Star))
 DEFAULT_NAME = u"Unnamed"
+NO_COLLECTION = u"(none)"
+NEW_COLLECTION = u"New sheet collection..."
+NO_COLLECTIONS_HERE = u"(this Revit version has no sheet collections)"
 
 
 class BatchSheetsWindow(forms.WPFWindow):
     """`titleblocks`: labels for the title block list, `chosen` the index
     to start on. `number`: (prefix, start, suffix) to start from.
     `evaluate(number_prefix, number_fields, number_suffix, name_prefix,
-    name_fields, name_suffix)` returns model rows."""
+    name_fields, name_suffix)` returns model rows. `collections`: the
+    names of the model's sheet collections, or None where this Revit has
+    none."""
 
-    def __init__(self, titleblocks, chosen, number, count, evaluate):
+    def __init__(self, titleblocks, chosen, number, count, evaluate,
+                 collections=None):
         forms.WPFWindow.__init__(self, XAML, literal_string=True)
         self.evaluate = evaluate
+        self.collections = collections
+        if collections is None:
+            self.collection_box.Items.Add(NO_COLLECTIONS_HERE)
+            self.collection_box.IsEnabled = False
+        else:
+            self.collection_box.Items.Add(NO_COLLECTION)
+            for name in collections:
+                self.collection_box.Items.Add(name)
+            self.collection_box.Items.Add(NEW_COLLECTION)
+        self.collection_box.SelectedIndex = 0
+        self.new_collection_box.IsEnabled = False
         self.result = None
         self.number_boxes = []
         self.name_boxes = []
@@ -141,6 +185,9 @@ class BatchSheetsWindow(forms.WPFWindow):
             box.TextChanged += self.on_changed
         self.count_box.TextChanged += self.on_count
         self.start_box.TextChanged += self.on_start
+        self.name_start_box.TextChanged += self.on_start
+        self.collection_box.SelectionChanged += self.on_collection
+        self.new_collection_box.TextChanged += self.on_changed
         self.create_button.Click += self.on_create
         self.cancel_button.Click += self.on_cancel
 
@@ -175,19 +222,19 @@ class BatchSheetsWindow(forms.WPFWindow):
         return int(to_text(self.count_box.Text).strip())
 
     def rebuild(self):
-        """Lay the rows out again for the count, numbered from the start,
-        keeping the name fields typed so far."""
+        """Lay the rows out again for the count, numbered from the start
+        values, keeping the fields typed so far that are not numbered."""
         count = self._count()
         if count is None:
             self.rows_ok = False
             self.refresh()
             return
-        numbers = model.number_fields(count, to_text(self.start_box.Text))
-        if numbers is None:
-            numbers = model.resize(
-                [to_text(b.Text) for b in self.number_boxes], count, u"")
-        names = model.resize([to_text(b.Text) for b in self.name_boxes],
-                             count, DEFAULT_NAME)
+        numbers = model.fields(count, to_text(self.start_box.Text),
+                               [to_text(b.Text) for b in self.number_boxes],
+                               u"")
+        names = model.fields(count, to_text(self.name_start_box.Text),
+                             [to_text(b.Text) for b in self.name_boxes],
+                             DEFAULT_NAME)
         grid = self.rows_grid
         for box in self.number_boxes + self.name_boxes:
             box.TextChanged -= self.on_changed
@@ -232,6 +279,15 @@ class BatchSheetsWindow(forms.WPFWindow):
                 [to_text(b.Text) for b in self.name_boxes],
                 to_text(self.name_suffix_box.Text))
 
+    def collection(self):
+        """None, ("existing", index into `collections`) or ("new", name)."""
+        index = self.collection_box.SelectedIndex
+        if self.collections is None or index <= 0:
+            return None
+        if index <= len(self.collections):
+            return (u"existing", index - 1)
+        return (u"new", to_text(self.new_collection_box.Text).strip())
+
     def refresh(self):
         count_problem = model.count_problem(self.count_box.Text)
         if count_problem or not self.rows_ok:
@@ -252,18 +308,31 @@ class BatchSheetsWindow(forms.WPFWindow):
                 problems += 1
                 name_block.Text = u"{0}   ({1})".format(row.name,
                                                        row.problem)
-        if model.number_fields(1, to_text(self.start_box.Text)) is None:
-            start_note = (u" Start at a number such as 1, 01 or 101, or a "
-                          u"single letter, to number the rows.")
-        else:
-            start_note = u""
+        start_note = u""
+        if not model.counts_from(to_text(self.start_box.Text)):
+            start_note += (u" Start the number at 1, 01, 101 or a single "
+                           u"letter to number the rows.")
+        name_start = to_text(self.name_start_box.Text).strip()
+        if name_start and not model.counts_from(name_start):
+            start_note += (u" Start the name at 1, 01, 101 or a single "
+                           u"letter to number it, or leave it empty.")
         if problems:
             self.status_text.Text = (u"{0} sheet(s) cannot be made, shown in "
                                      u"red.".format(problems) + start_note)
         else:
             self.status_text.Text = (u"{0} sheet(s) will be made.".format(
                 len(rows)) + start_note)
-        self.create_button.IsEnabled = bool(rows) and not problems
+        choice = self.collection()
+        collection_problem = u""
+        if choice is not None and choice[0] == u"new":
+            collection_problem = model.collection_problem(
+                choice[1], self.collections)
+        if collection_problem:
+            self.status_text.Text = (u"Sheet collection: " +
+                                     collection_problem + u". " +
+                                     self.status_text.Text)
+        self.create_button.IsEnabled = (bool(rows) and not problems and
+                                        not collection_problem)
 
     # -- events ---------------------------------------------------------
 
@@ -276,10 +345,17 @@ class BatchSheetsWindow(forms.WPFWindow):
     def on_start(self, sender, args):
         self.rebuild()
 
+    def on_collection(self, sender, args):
+        choice = self.collection()
+        self.new_collection_box.IsEnabled = (choice is not None and
+                                             choice[0] == u"new")
+        self.refresh()
+
     def on_create(self, sender, args):
         self.result = dict(
             titleblock=self.titleblock_box.SelectedIndex,
-            values=self.values())
+            values=self.values(),
+            collection=self.collection())
         self.Close()
 
     def on_cancel(self, sender, args):
@@ -287,10 +363,12 @@ class BatchSheetsWindow(forms.WPFWindow):
         self.Close()
 
 
-def ask(titleblocks, chosen, number, count, evaluate):
+def ask(titleblocks, chosen, number, count, evaluate, collections=None):
     """{"titleblock": index, "values": (number_prefix, number_fields,
-    number_suffix, name_prefix, name_fields, name_suffix)} as left when
-    Create was pressed, or None."""
-    window = BatchSheetsWindow(titleblocks, chosen, number, count, evaluate)
+    number_suffix, name_prefix, name_fields, name_suffix), "collection":
+    None, ("existing", index) or ("new", name)} as left when Create was
+    pressed, or None."""
+    window = BatchSheetsWindow(titleblocks, chosen, number, count, evaluate,
+                               collections)
     window.ShowDialog()
     return window.result

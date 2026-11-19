@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.50.0.** The authoritative number is `__version__` in
+**Version 2.51.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -125,11 +125,15 @@ none), how many sheets, and each sheet's number and name, built like
 Rename Views/Sheets as a prefix, a field of each sheet's own and a suffix. The
 number fields count up from a start value (1, 01, 101 or A), and the
 start is offered where the model's own numbering leaves off: after A-105
-it offers A- and 106. Every field can still be edited per row. Each new
+it offers A- and 106. The name fields can be numbered the same way:
+give the name a start value and they count up from it, or leave it
+empty to type each name. Every field can still be edited per row. Each new
 number and name is shown as you type, in red with the reason if Revit
 would refuse it: a character Revit does not allow, a number another
-sheet already has, or two new sheets landing on one number. If Revit
-refuses any sheet, none are made.
+sheet already has, or two new sheets landing on one number. The sheets
+can also go into a sheet collection: one already in the model, or a new
+one named in the window (Revit 2025 and later). If Revit refuses any
+sheet, none are made, and a new collection is not made either.
 
 **Rename Views/Sheets.** Renames views and sheets together. Select them in the
 Project Browser (or tick them in a list if nothing is selected). A window
@@ -634,7 +638,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.48.1 | Update Openings: each opening's Id kept from before it is deleted, so the report after a re-cut no longer crashes | Worked in Revit 2025 |
 | 2.49.0 | Model panel: Split Wall Layers, one wall per layer of each selected wall's structure, each with a one layer type | Ran in Revit: a plain wall refused as "its layers change up its height", under an empty table |
 | 2.49.1 | Split Wall Layers: layers that change up a wall found with `IsVerticallyHomogeneous()`, not `IsVerticallyCompound`; the refusal names what Revit said; no empty table when every wall is refused | Worked in Revit |
-| 2.50.0 | Split Wall Layers splits walls with doors, windows and wall openings: the original becomes the core layer and keeps them, the other layers are joined to it so doors and windows cut them, wall openings are copied into each layer, and every layer is checked for its cuts after the run. Shift-click splits into three walls: exterior layers, core, interior layers | Measured first with a probe button in Revit 2025; not yet run as a release, current |
+| 2.50.0 | Split Wall Layers splits walls with doors, windows and wall openings: the original becomes the core layer and keeps them, the other layers are joined to it so doors and windows cut them, wall openings are copied into each layer, and every layer is checked for its cuts after the run. Shift-click splits into three walls: exterior layers, core, interior layers | Measured first with a probe button in Revit 2025; not yet run as a release |
+| 2.51.0 | Batch Sheets: the sheet names can be numbered from a start value like the sheet numbers, and the sheets can go into an existing or a new sheet collection | Not yet run in Revit; current |
 
 ## Licence
 
