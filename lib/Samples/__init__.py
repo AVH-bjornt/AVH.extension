@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 def open_sample_file(file_name):
     """Function to open Sample file located at:
     ...\pyRevitStarterKit.extension\lib\Samples\{{file_name}}"""
