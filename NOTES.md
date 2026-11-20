@@ -1050,7 +1050,9 @@ AVH.extension/
       Make Forma View.pushbutton/
     Views.panel/
       Sheets.stack/
-        Batch Sheets.pushbutton/
+        Batch.pulldown/
+          Batch Sheets.pushbutton/
+          Batch Dependents.pushbutton/
         Rename Views.pushbutton/
         Align.pulldown/
           Align Views.pushbutton/
@@ -2614,6 +2616,67 @@ still gives an outline, and whether `VIEWPORT_ATTR_SHOW_LABEL` is the
 Show Title parameter with 0 for No.
 Each of these shows up as a skipped or "did not land" row rather than
 a false success.
+
+## Batch Dependents (2.53.0)
+
+Asked for as a companion to Batch Sheets: many dependent views at once,
+named the way Batch Sheets and Rename Views name things, prefix + field +
+suffix, checked live in the window.
+
+### Names
+
+The model is `lib/avh_dependents/model.py`, built on `avh_rename.model`
+(compose, problem, FORBIDDEN) and `avh_sheets.model.fields` (count from a
+start value, or keep what was typed). With several parents one prefix
+cannot be "the parent's name", so the prefix and suffix may hold
+`{parent}`, replaced per parent. Braces are characters Revit refuses in a
+name, so a mistyped token is shown in red and never reaches the model.
+The fields restart at the start value for each parent. Names are unique
+per view type, the same assumption Rename Views makes; a dependent has its
+parent's view type.
+
+### Which views
+
+`View.CanViewBeDuplicated(ViewDuplicateOption.AsDependent)`, not a
+template, and `GetPrimaryViewId()` invalid. The last is there because
+whether Revit answers no for a view that is already a dependent is not
+confirmed; the harness's fake answers yes so the script's own check is
+what keeps it out. Selected views that do not qualify are named in the
+report; a selection with none that qualify falls back to the tick list.
+
+Scope boxes per dependent were offered in the design and left out at
+Björn's choice.
+
+### Writing
+
+One transaction: `Duplicate(AsDependent)`, `doc.GetElement`, set `Name`,
+then every name and `GetPrimaryViewId()` read back. Any miss, refusal or
+a commit that does not come back Committed rolls everything back.
+
+### What the mutations proved
+
+The harness runs the script again with each safety line taken out (in
+memory) and needs at least one check to fail; `-v` prints how many.
+Name readback skipped: 1. Parent readback skipped: 1. Commit status
+ignored: 1. No roll back on a refusal: 3. Pre-check skipped: 2.
+Dependents of dependents let through: 1 (it survived until the fake's
+`CanViewBeDuplicated` stopped refusing dependents itself).
+`CanViewBeDuplicated` ignored: 3. Taken names not passed: 2. Selection
+ignored: 15.
+
+### Layout
+
+The Sheets stack was full, so Batch Sheets moved into a `Batch.pulldown`
+with Batch Dependents; the pulldown carries Batch Sheets' icon. Restart
+Revit after updating rather than reloading pyRevit: the old Batch Sheets
+button is still on the ribbon until then.
+
+### Unverified
+
+Not yet run in Revit: the window, `CanViewBeDuplicated`, `Duplicate`
+with `AsDependent`, `GetPrimaryViewId` on the new view, and per view type
+name uniqueness. A refusal or a readback miss rolls the run back rather
+than passing silently.
 
 ## Update AVH: measured, not trusted
 
