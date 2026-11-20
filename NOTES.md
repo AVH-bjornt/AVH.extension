@@ -1050,13 +1050,12 @@ AVH.extension/
       Make Forma View.pushbutton/
     Views.panel/
       Sheets.stack/
-        Batch.pulldown/
-          Batch Sheets.pushbutton/
-          Batch Dependents.pushbutton/
+        Batch Sheets.pushbutton/
         Rename Views.pushbutton/
-        Align.pulldown/
-          Align Views.pushbutton/
-          Align Titles.pushbutton/
+        Batch Dependents.pushbutton/
+      Align.pulldown/          a big button of its own
+        Align Views.pushbutton/
+        Align Titles.pushbutton/
       Visibility.stack/
         Hide.pulldown/
           Hide Across Views.pushbutton/
@@ -2600,7 +2599,8 @@ regenerate hid it).
 The Sheets stack was full (three items), so Align Views moved into an
 `Align.pulldown` with Align Titles. Restart Revit after updating rather
 than reloading pyRevit: the old Align Views button is still on the
-ribbon until then.
+ribbon until then. In 2.53.0 the Align pulldown moved out of the stack to
+a big button of its own (see Batch Dependents, Layout).
 
 ### What the mutations proved
 
@@ -2666,10 +2666,12 @@ ignored: 15.
 
 ### Layout
 
-The Sheets stack was full, so Batch Sheets moved into a `Batch.pulldown`
-with Batch Dependents; the pulldown carries Batch Sheets' icon. Restart
-Revit after updating rather than reloading pyRevit: the old Batch Sheets
-button is still on the ribbon until then.
+At Björn's request the Sheets stack is Batch Sheets, Rename Views and
+Batch Dependents, and `Align.pulldown` (Align Views, Align Titles) moved
+out of the stack to the panel itself, where it shows as a big dropdown
+button with its 96 px icon. Restart Revit after updating rather than
+reloading pyRevit: Revit cannot remove ribbon items, and the stack is
+added in one call that fails while a name in it is still on the ribbon.
 
 ### Unverified
 

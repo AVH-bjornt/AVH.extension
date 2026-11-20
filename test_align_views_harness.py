@@ -27,7 +27,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
-SCRIPT = os.path.join(HERE, "AVH.tab", "Views.panel", "Sheets.stack",
+SCRIPT = os.path.join(HERE, "AVH.tab", "Views.panel",
                       "Align.pulldown", "Align Views.pushbutton", "script.py")
 
 from avh_viewports import model  # noqa: E402

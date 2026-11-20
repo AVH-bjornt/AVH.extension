@@ -36,8 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 
 SCRIPT = os.path.join(HERE, "AVH.tab", "Views.panel", "Sheets.stack",
-                      "Batch.pulldown", "Batch Dependents.pushbutton",
-                      "script.py")
+                      "Batch Dependents.pushbutton", "script.py")
 SOURCE = io.open(SCRIPT, encoding="utf-8").read()
 
 import avh_dependents                   # noqa: E402
