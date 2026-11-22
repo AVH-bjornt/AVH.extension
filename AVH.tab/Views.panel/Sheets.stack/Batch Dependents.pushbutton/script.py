@@ -29,13 +29,13 @@ Nothing is written to disk.
 
 ## Unverified
 
-Not yet run in Revit: the window (lib/avh_dependents/window.py, built
-like the Batch Sheets window, which has run), `View.CanViewBeDuplicated`
-and `View.Duplicate` with `ViewDuplicateOption.AsDependent`,
-`View.GetPrimaryViewId` on the new view, and whether Revit's view name
-uniqueness is per view type as the pre-check assumes (Rename Views makes
-the same assumption). Revit refusing a name the pre-check let through is
-caught and rolls the run back.
+Tested by the user in Revit 2025 before 2.53.0 was released. Which cases
+were tried was not recorded, so these are still unconfirmed: what
+`View.CanViewBeDuplicated` answers for a view that is already a
+dependent, whether Revit's view name uniqueness is per view type as the
+pre-check assumes (Rename Views makes the same assumption), and the roll
+back when Revit refuses a view. That roll back is tested against a fake
+Revit only.
 """
 
 __title__ = "Batch\nDependents"

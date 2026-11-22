@@ -2675,10 +2675,10 @@ added in one call that fails while a name in it is still on the ribbon.
 
 ### Unverified
 
-Not yet run in Revit: the window, `CanViewBeDuplicated`, `Duplicate`
-with `AsDependent`, `GetPrimaryViewId` on the new view, and per view type
-name uniqueness. A refusal or a readback miss rolls the run back rather
-than passing silently.
+Tested by Björn in Revit 2025 before release; which cases were tried was
+not recorded. Still unconfirmed: what `CanViewBeDuplicated` answers for a
+dependent, per view type name uniqueness, and the roll back on a refusal
+or a readback miss, which only the harness has exercised.
 
 ## Update AVH: measured, not trusted
 
