@@ -84,3 +84,49 @@ def new_offset(offset, current, wanted):
 
 def same_length(a, b, tolerance=TOLERANCE_FT):
     return a is not None and b is not None and abs(a - b) <= tolerance
+
+
+# --------------------------------------------------------------------------
+# The picker's sheet collection dropdown
+# --------------------------------------------------------------------------
+
+ALL_SHEETS = u"[All sheets]"
+NO_COLLECTION = u"[Not in a collection]"
+
+
+def collection_groups(entries):
+    """[(group name, [labels])] for the picker's dropdown, from
+    [(label, collection name or None)] in list order: every label first,
+    then each collection by name, then those in none. None when no label
+    is in a collection (Revit before 2025, or none made), so the picker
+    stays a plain list.
+
+    The brackets keep the two made-up groups apart from any collection
+    of the same name.
+    """
+    named = {}
+    loose = []
+    for label_text, collection in entries:
+        if collection:
+            named.setdefault(collection, []).append(label_text)
+        else:
+            loose.append(label_text)
+    if not named:
+        return None
+    groups = [(ALL_SHEETS, [entry[0] for entry in entries])]
+    for name in sorted(named, key=lambda n: n.lower()):
+        groups.append((name, named[name]))
+    if loose:
+        groups.append((NO_COLLECTION, loose))
+    return groups
+
+
+def unique(items):
+    """Items in order, each once."""
+    seen = set()
+    kept = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            kept.append(item)
+    return kept

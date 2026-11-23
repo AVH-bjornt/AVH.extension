@@ -57,6 +57,7 @@ if _LIB_DIR not in sys.path:
 
 from pyrevit import revit, DB, forms, script      # noqa: E402
 from avh_viewports import model                   # noqa: E402
+from avh_viewports import picker                  # noqa: E402
 from avh_schedules.compat import to_text          # noqa: E402
 
 output = script.get_output()
@@ -71,8 +72,9 @@ MATCH_TYPE = u"Match viewport type"
 class Placed(object):
     """A viewport, its view and its sheet, read once."""
 
-    def __init__(self, viewport, view, sheet):
+    def __init__(self, viewport, view, sheet, collection=None):
         self.viewport = viewport
+        self.collection = collection
         self.view = view
         self.sheet = sheet
         self.label = model.label(sheet.SheetNumber, sheet.Name, view.Name)
@@ -89,7 +91,8 @@ def placed_views(doc):
             continue
         if view is None or sheet is None:
             continue
-        found.append(Placed(viewport, view, sheet))
+        found.append(Placed(viewport, view, sheet,
+                            picker.collection_name(doc, sheet)))
     found.sort(key=lambda p: p.label)
     return found
 
@@ -106,18 +109,9 @@ def selected_viewport(placed):
 
 
 def pick(placed, multiselect, title, button):
-    by_label = dict((p.label, p) for p in placed)
-    answer = forms.SelectFromList.show(
-        [p.label for p in placed], multiselect=multiselect, title=title,
-        button_name=button)
-    if not answer:
-        return [] if multiselect else None
-    if not isinstance(answer, list):
-        answer = [answer]
-    chosen = [by_label[to_text(a)] for a in answer if to_text(a) in by_label]
-    if multiselect:
-        return chosen
-    return chosen[0] if chosen else None
+    """The picker, with a sheet collection dropdown where the model has
+    collections."""
+    return picker.pick(forms, placed, multiselect, title, button)
 
 
 def title_hidden(doc, viewport):

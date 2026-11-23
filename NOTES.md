@@ -2594,6 +2594,31 @@ changing a type that already matches, 1; no regenerate after the type
 change, 1 (only once a Position only case was added: the line step's
 regenerate hid it).
 
+### The sheet collection dropdown (2.54.0)
+
+Both Align buttons pick placed views through `lib/avh_viewports/
+picker.py`. With sheet collections in the model, `SelectFromList` is
+given an `OrderedDict` of groups (`[All sheets]`, each collection by
+name, `[Not in a collection]`), `sort_groups="unsorted"` to keep that
+order, and `default_group` on all sheets. Without collections, or on a
+Revit before 2025 (no `ViewSheet.SheetCollectionId`), it stays the plain
+list.
+
+Read in the installed pyRevit 7.1 source rather than assumed: rows that
+are already `TemplateListItem`s are used as they are, and a multiselect
+returns ticked rows from every group, each row once by identity
+(`_get_all_ctx`). So every group is built from the **same** row objects:
+a tick under a collection shows under `[All sheets]` and comes back once.
+The rows' own `state` is read after the dialog as well, so a pyRevit that
+returns only the group on screen still keeps ticks made under another.
+
+`test_align_picker.py` fakes both behaviours. Mutations: fresh rows per
+group, 3 checks fail; no dedupe, 2; ignoring the rows' ticks, letting
+pyRevit sort the groups, no default group, 1 each.
+
+Ran in Revit 2025 and worked: `SheetCollectionId` read through
+`doc.GetElement`, and the dropdown on screen.
+
 ### Layout
 
 The Sheets stack was full (three items), so Align Views moved into an

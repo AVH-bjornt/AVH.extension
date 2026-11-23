@@ -192,6 +192,13 @@ viewports and viewport types with the title switched off are skipped and
 listed. Every title is read back after the change; if any is more than
 0.1 mm out, nothing is changed.
 
+In both Align buttons, when the model has sheet collections (Revit 2025),
+the view lists get a **Sheet collection** dropdown at the top. It opens
+on **[All sheets]**; pick a collection to see only its sheets, or
+**[Not in a collection]** for the rest. A view ticked under one
+collection stays ticked when you switch to another, and every ticked view
+is aligned, not only those in the collection on screen.
+
 **Hide Across Views** (under **Hide**). Hides or unhides the selected
 elements in views you pick. Shift click to work on their categories instead.
 
@@ -673,7 +680,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.50.0 | Split Wall Layers splits walls with doors, windows and wall openings: the original becomes the core layer and keeps them, the other layers are joined to it so doors and windows cut them, wall openings are copied into each layer, and every layer is checked for its cuts after the run. Shift-click splits into three walls: exterior layers, core, interior layers | Measured first with a probe button in Revit 2025; not yet run as a release |
 | 2.51.0 | Batch Sheets: the sheet names can be numbered from a start value like the sheet numbers, and the sheets can go into an existing or a new sheet collection | Ran in Revit 2025 |
 | 2.52.0 | Align Titles: view titles on other sheets lined up with one chosen title, at the same point on the sheet and optionally with the same line length and viewport type. Align Views and Align Titles share an **Align** pulldown in the Sheets stack | Ran in Revit 2025, with and without the viewport type switch |
-| 2.53.0 | Views panel: Batch Dependents, a number of dependent views under each chosen view, named as prefix + field + suffix with `{parent}` for the parent's name. The Sheets stack is now Batch Sheets, Rename Views/Sheets and Batch Dependents; **Align** moved out of it to a big dropdown button of its own | Tested in Revit 2025; current |
+| 2.53.0 | Views panel: Batch Dependents, a number of dependent views under each chosen view, named as prefix + field + suffix with `{parent}` for the parent's name. The Sheets stack is now Batch Sheets, Rename Views/Sheets and Batch Dependents; **Align** moved out of it to a big dropdown button of its own | Tested in Revit 2025 |
+| 2.54.0 | Align Views and Align Titles: a sheet collection dropdown in their view lists; ticks are kept across collections | Ran in Revit 2025; current |
 
 ## Licence
 

@@ -89,6 +89,15 @@ class FakeType(object):
         return Namespace(AsInteger=lambda: self.show)
 
 
+class FakeRow(object):
+    """pyRevit's TemplateListItem."""
+
+    def __init__(self, orig_item, checked=False, checkable=True,
+                 name_attr=None):
+        self.item = orig_item
+        self.state = checked
+
+
 class FakeNamed(object):
     def __init__(self, doc, value, **kwargs):
         self.Id = FakeId(value)
@@ -247,9 +256,20 @@ class Recorder(object):
         self.printed = []
         self.pickers = []
         self.switches = []
+        self.groups = []
 
     def show(self, items, multiselect=False, title=u"", button_name=u"",
              **kwargs):
+        if isinstance(items, dict):
+            # Grouped, like pyRevit 7.1: rows across every group, once.
+            self.groups.append(list(items))
+            seen, rows = set(), []
+            for group in items.values():
+                for row in group:
+                    if id(row) not in seen:
+                        seen.add(id(row))
+                        rows.append(row)
+            items = [row.item for row in rows]
         self.pickers.append((title, list(items)))
         if multiselect:
             picked = [i for i in items if any(t in i for t in self.ticks)]
@@ -296,6 +316,7 @@ def run_script(doc, recorder):
     pyrevit.forms = Namespace(
         alert=recorder.alert,
         SelectFromList=Namespace(show=recorder.show),
+        TemplateListItem=FakeRow,
         CommandSwitchWindow=Namespace(show=recorder.switch))
     pyrevit.script = Namespace(
         get_output=lambda: Namespace(
@@ -507,6 +528,23 @@ rec = run_script(doc, Recorder(ticks=[u"A-102"], selected=[1], match=True))
 check("type ignored: rolled back and reported",
       doc.log == ["start", "rollback"] and u"type not set" in rec.text()
       and b._offset == (0.00, 0.02), (doc.log, rec.text()))
+
+# 17. Sheet collections: the pickers get the dropdown, the run is the same.
+doc, a, b, c = site()
+doc.elements[8001] = FakeNamed(doc, 8001, Name=u"Arkitekt")
+for vp in (a, b):
+    doc.elements[vp.SheetId.Value].SheetCollectionId = FakeId(8001)
+doc.elements[c.SheetId.Value].SheetCollectionId = FakeId(-1)
+want = a.true_corner()
+rec = run_script(doc, Recorder(ticks=[u"A-102"], source=u"A-101"))
+check("collections: both pickers have the dropdown",
+      rec.groups == [[u"[All sheets]", u"Arkitekt",
+                      u"[Not in a collection]"],
+                     [u"[All sheets]", u"Arkitekt",
+                      u"[Not in a collection]"]], rec.groups)
+check("collections: the ticked title still lands",
+      close(b.true_corner(), want) and doc.log == ["start", "commit"],
+      (doc.log, rec.text()))
 
 # 16. Position only with the type switch: the title is read after the
 # type change has been regenerated, with no line step to do it.
