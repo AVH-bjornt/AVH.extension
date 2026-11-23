@@ -1040,6 +1040,9 @@ AVH.extension/
   lib/avh_worksets/
     model.py    what moves, picker labels and the tally, no Revit
     links.py    which link workset is the datum one, what stays open, no Revit
+  lib/avh_renumber/
+    model.py    running numbers, order and what changes, no Revit
+    window.py   the Renumber window, WPF
   AVH.tab/
     Coordination.panel/
       Links.stack/
@@ -1080,6 +1083,7 @@ AVH.extension/
         StampElementIds.pushbutton/
         Room Data Sync.pushbutton/
         Flip Status.pushbutton/
+      Renumber.pushbutton/
 ```
 
 Regrouped at 2.42.0 by what the user is doing: set up the project
@@ -2704,6 +2708,111 @@ Tested by Björn in Revit 2025 before release; which cases were tried was
 not recorded. Still unconfirmed: what `CanViewBeDuplicated` answers for a
 dependent, per view type name uniqueness, and the roll back on a refusal
 or a readback miss, which only the harness has exercised.
+
+## Renumber (2.55.0)
+
+One instance parameter, many elements, prefix + running number +
+suffix. The counting is Batch Sheets' (1, 01, 101 or a letter) with a
+step added, written again in `lib/avh_renumber/model.py` rather than
+reused, because `avh_rename.model.numbers` has no step.
+
+### Keeping a format: #QQC001 to #QQC999
+
+Björn's case: values like `#QQC001` up to `#QQC999`. A start with a
+leading zero pins the width, so `001` with 1000 elements is refused in
+the window ("only 999 fit") instead of producing `#QQC1000`, which
+breaks the format and sorts before `#QQC101` as text. "1" and "101" have
+no pinned width and grow as before. The prefix, width and suffix are
+also suggested from the values the elements already hold (the most
+common prefix + digits + suffix shape; zero padded only if some value
+is), so an existing format is kept without retyping it.
+
+### Only elements with no value
+
+A tick box in the window. Elements that already hold a value keep it
+(their row shows unchanged and is not written) and only the empty ones
+are numbered, in the chosen order, skipping every value the others hold
+so no number is given twice. Starting at `001` therefore fills the gaps
+first and then carries on after the highest. Kept elements still sit in
+the order, so they still decide where the empty ones fall in it.
+
+Empty means no text, only spaces, or `HasValue` false. The last matters
+for a whole number parameter that was never set: it reads 0 through
+`AsInteger()`, and a 0 that someone typed is a value and is kept.
+
+What is skipped is what the chosen elements hold, not the whole model:
+a `#QQC005` on an element left out of the selection is not seen, and
+Revit's duplicate Mark warning in the report is where that shows up.
+
+### Which elements, in which order
+
+The selection if there is one, otherwise picked one at a time with
+`PickObject` until Esc. Revit's selection has no reliable order, so a
+selection is numbered by position (or value, or id) and only picked
+elements offer "as picked". Picking an element twice is ignored, and
+each pick is added to the selection so the picks so far stay visible.
+
+Positions come from `Location.Point`, the middle of `Location.Curve`,
+`GetBoxCenter()` (viewports), or the bounding box, in that order, and are
+rounded to 10 mm before sorting, so a row of doors drawn a few
+millimetres out of line still numbers along the row. Elements with no
+position go last, in the order they were picked.
+
+### Which parameters
+
+Offered: text and whole number instance parameters that every chosen
+element has, editable on all of them, with the same storage. Yes/No is
+stored as an Integer and is left out through `GetDataType()`. A whole
+number parameter takes no prefix, suffix or letters; the window refuses
+that before Write is pressed.
+
+### Writing
+
+Only values that change are written. One transaction, every `Set`
+result checked and every value read back; any refusal, mismatch or
+rolled back commit and nothing is written. A failure preprocessor
+deletes warnings (they are listed in the report instead: two doors on
+one Mark is a warning Revit shows after the commit, and the person
+asked for exactly that) and rolls back on an error, so no Revit dialog
+appears mid-run.
+
+Grouped elements are left out unless the parameter varies across group
+instances, for the same reason as Flip Status: Revit would offer to
+ungroup. Elements checked out by another user are left out. Both are
+listed after the write and kept out of the numbering, so the numbers
+have no gaps.
+
+### Known limit
+
+A parameter Revit insists is unique, such as Sheet Number or a
+viewport's Detail Number, fails when renumbering swaps two values
+(1 and 2 become 2 and 1): the first write lands on a value the second
+element still holds. The whole run rolls back and the dialog names the
+element. A two pass write through temporary values would fix it; not
+done until someone needs it.
+
+### What the mutations proved
+
+`test_renumber_harness.py` runs the real script on a fake Revit whose
+values persist, whose transactions roll back, and which posts a warning
+for a duplicated Mark at commit. Seventeen mutations, each caught: commit
+status ignored, read back skipped, a `Set` refusal ignored, no roll back
+on an exception, the guard not attached, warnings not deleted, unchanged
+values written, the group and owner checks removed, Yes/No and read only
+parameters offered, element types kept, the selection ignored, a second
+pick kept, the existing format not suggested, "only empty" not passed
+from the window to the plan, and `HasValue` ignored. The width rule lives in
+the model and is checked there directly.
+
+### Unverified
+
+Tried by Björn in Revit 2025 before release; which cases were tried was
+not recorded. Still unconfirmed: `PickObject` in a loop and its Esc, keeping the
+picks selected, `DeleteWarning` in the preprocessor,
+`Definition.VariesAcrossGroups`, `GetDataType()` against
+`SpecTypeId.Boolean.YesNo`, `GetBoxCenter()`, `Parameter.HasValue`, and
+the window's order ComboBox and "only empty" CheckBox (the rest of the window is built like Batch Dependents', which
+has run).
 
 ## Update AVH: measured, not trusted
 

@@ -563,6 +563,28 @@ all three can be scheduled and filtered. Reports anything the parameters
 cannot take, and offers to switch on Vary Across Group Instances where
 that is what is blocking it.
 
+**Renumber.** Numbers one instance parameter across many elements as
+prefix + running number + suffix: `D-01`, `D-02`, `D-03`. Select the
+elements first, or click it with nothing selected and pick them one at a
+time in the order they should be numbered, then press Esc. Choose the
+parameter (any text or whole number instance parameter they all have and
+can edit, such as Mark, Comments or a shared parameter), then set the
+prefix, start (1, 01, 101 or a letter), step and suffix, and the order:
+as picked, left to right, top to bottom, by the value they hold now, or
+by element id. If the elements already hold values like `#QQC014`, the
+window starts from that format (prefix `#QQC`, start `001`). A start
+with a leading zero keeps its width: `001` runs to `999` and refuses to
+go further rather than write `#QQC1000`. Tick **Only elements with no
+value** to keep every value already there and number only the empty
+ones: the numbers already in use among the chosen elements are skipped,
+so starting at `001` fills the gaps and then carries on after the
+highest. Every new value is shown before anything is written.
+Values that already match are left alone, and if Revit refuses any one
+value nothing is written. Revit's warnings, such as two elements sharing
+a Mark, are listed in the output window instead of popping up. Grouped
+elements are left out unless the parameter varies across group
+instances. Tried in Revit 2025.
+
 ### Update
 
 **Update AVH.** Gets the newest AVH tools from GitHub and reloads
@@ -681,7 +703,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.51.0 | Batch Sheets: the sheet names can be numbered from a start value like the sheet numbers, and the sheets can go into an existing or a new sheet collection | Ran in Revit 2025 |
 | 2.52.0 | Align Titles: view titles on other sheets lined up with one chosen title, at the same point on the sheet and optionally with the same line length and viewport type. Align Views and Align Titles share an **Align** pulldown in the Sheets stack | Ran in Revit 2025, with and without the viewport type switch |
 | 2.53.0 | Views panel: Batch Dependents, a number of dependent views under each chosen view, named as prefix + field + suffix with `{parent}` for the parent's name. The Sheets stack is now Batch Sheets, Rename Views/Sheets and Batch Dependents; **Align** moved out of it to a big dropdown button of its own | Tested in Revit 2025 |
-| 2.54.0 | Align Views and Align Titles: a sheet collection dropdown in their view lists; ticks are kept across collections | Ran in Revit 2025; current |
+| 2.54.0 | Align Views and Align Titles: a sheet collection dropdown in their view lists; ticks are kept across collections | Ran in Revit 2025 |
+| 2.55.0 | Data panel: Renumber, one text or whole number instance parameter numbered across selected or picked elements as prefix + running number + suffix, in the order picked or by position; a leading zero start keeps its width (#QQC001 to #QQC999); optionally only elements with no value, skipping numbers in use | Tried in Revit 2025; current |
 
 ## Licence
 
