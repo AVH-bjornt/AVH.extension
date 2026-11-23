@@ -585,6 +585,22 @@ a Mark, are listed in the output window instead of popping up. Grouped
 elements are left out unless the parameter varies across group
 instances. Tried in Revit 2025.
 
+**Rename Types.** Renames family types from their own parameter
+values. Select elements or types (in the model, a schedule or the
+Project Browser) and their types are renamed; with nothing selected,
+tick families in a list and all their types are. Type the name as a
+pattern with parameter names in braces, such as
+`{Width}x{Height} {Material}` or `D-{Type Mark}`: the list beside it
+holds every type parameter with an example value, and double-clicking
+one inserts it. Values come in as Revit shows them (project units,
+decimal comma), a material or other element gives its name, and
+characters Revit does not allow in a name become `-`. Every new name is
+shown before anything is written; names another type in the family
+already has, or that two types would share, are shown red and block the
+run. Two types can swap names. If Revit refuses any one name nothing is
+renamed. Types of in-place families and types checked out by someone
+else are left out and listed. Tested against a fake Revit only.
+
 ### Update
 
 **Update AVH.** Gets the newest AVH tools from GitHub and reloads
@@ -704,7 +720,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.52.0 | Align Titles: view titles on other sheets lined up with one chosen title, at the same point on the sheet and optionally with the same line length and viewport type. Align Views and Align Titles share an **Align** pulldown in the Sheets stack | Ran in Revit 2025, with and without the viewport type switch |
 | 2.53.0 | Views panel: Batch Dependents, a number of dependent views under each chosen view, named as prefix + field + suffix with `{parent}` for the parent's name. The Sheets stack is now Batch Sheets, Rename Views/Sheets and Batch Dependents; **Align** moved out of it to a big dropdown button of its own | Tested in Revit 2025 |
 | 2.54.0 | Align Views and Align Titles: a sheet collection dropdown in their view lists; ticks are kept across collections | Ran in Revit 2025 |
-| 2.55.0 | Data panel: Renumber, one text or whole number instance parameter numbered across selected or picked elements as prefix + running number + suffix, in the order picked or by position; a leading zero start keeps its width (#QQC001 to #QQC999); optionally only elements with no value, skipping numbers in use | Tried in Revit 2025; current |
+| 2.55.0 | Data panel: Renumber, one text or whole number instance parameter numbered across selected or picked elements as prefix + running number + suffix, in the order picked or by position; a leading zero start keeps its width (#QQC001 to #QQC999); optionally only elements with no value, skipping numbers in use | Tried in Revit 2025 |
+| 2.56.0 | Data panel: Rename Types, family types renamed from their own parameter values with a pattern such as `{Width}x{Height} {Material}`, for the selected elements' types or every type of ticked families; clashes within a family shown before writing, swaps allowed | Not yet run in Revit; current |
 
 ## Licence
 

@@ -1043,6 +1043,9 @@ AVH.extension/
   lib/avh_renumber/
     model.py    running numbers, order and what changes, no Revit
     window.py   the Renumber window, WPF
+  lib/avh_typenames/
+    model.py    name patterns, clashes within a family, no Revit
+    window.py   the Rename Types window, WPF
   AVH.tab/
     Coordination.panel/
       Links.stack/
@@ -1084,6 +1087,7 @@ AVH.extension/
         Room Data Sync.pushbutton/
         Flip Status.pushbutton/
       Renumber.pushbutton/
+      Rename Types.pushbutton/
 ```
 
 Regrouped at 2.42.0 by what the user is doing: set up the project
@@ -2813,6 +2817,84 @@ picks selected, `DeleteWarning` in the preprocessor,
 `SpecTypeId.Boolean.YesNo`, `GetBoxCenter()`, `Parameter.HasValue`, and
 the window's order ComboBox and "only empty" CheckBox (the rest of the window is built like Batch Dependents', which
 has run).
+
+## Rename Types (2.56.0)
+
+Type names built from the type's own parameters, so a door family's
+types read `800x2100 Eik` instead of `Type 1`. A pattern with
+`{parameter}` names rather than Rename Views' prefix + field + suffix,
+because the point is several values in one name, in any order, with any
+text between.
+
+### Which types
+
+The types of the selection: an instance gives its type, a type picked
+in the Project Browser is itself, each type once however many of its
+instances are selected. With nothing selected, a list of every family
+in the model by "Category: Family" (system families included, such as
+`Veggir: Basic Wall`), searchable, and every type of the ticked ones.
+
+### Values
+
+Read the way Revit shows them, through `AsValueString()`, so lengths
+are in the project's units with its decimal comma and no conversion is
+done here. Text through `AsString()`. An ElementId parameter (Material)
+gives the element's name, not `AsValueString()`, which for some
+parameters is the id. `Family Name`, `Type Name` and `Category` are
+always offered even if the type has no such parameter. Names are
+matched ignoring case. A missing or empty value gives nothing, and the
+spaces round it are closed up, so `D {Lýsing} {Width}` with no Lýsing
+is `D 900`.
+
+Revit refuses ``\ : { } [ ] | ; < > ? ` ~`` in a name (the list Rename
+Views already keeps, `avh_rename.model.FORBIDDEN`). From a value they
+become `-`, since `1:50` in a parameter is not a mistake; typed into the
+pattern they are refused, since there they are.
+
+### Uniqueness
+
+A type name must be unique within its family. The key is the Family's
+id for a loadable family, and category + `FamilyName` for a system
+family. The script gathers the names of every type in those families
+that is not being renamed, and the plan refuses a name that one of them
+has, or that two chosen types would both get, compared ignoring case.
+Ignoring case is an assumption: stricter than Revit may be, never
+looser. One bad name stops the whole run, so a family is never left
+half renamed; the window shows each bad name red with its reason.
+
+Two chosen types may swap or shift names (`A` to `B` while `B` goes to
+`C`). Revit checks each set as it happens, so the types whose current
+name another type wants are first moved to `old name (AVH id)`, then
+every type gets its final name, all in one transaction.
+
+### Writing
+
+One transaction, same guard as Renumber: warnings listed, an error rolls
+back. Every name is read back; a refusal, a different name back or a
+rolled back commit and nothing is renamed. Unchanged types are not
+touched. In-place families and types checked out by someone else are
+left out and listed.
+
+### What the mutations proved
+
+`test_rename_types_harness.py` runs the real script on a fake Revit
+that refuses a duplicate name within a family as each name is set,
+so a swap only works through temporary names. Fourteen mutations, each
+caught: commit status ignored, read back skipped, no roll back on an
+exception, the guard not attached, warnings not deleted, unchanged
+names written, no temporary names, the owner and in-place checks
+removed, the selection ignored, a type counted once per instance, the
+names of types not chosen ignored, an ElementId read as its id, and the
+plan's problem not checked before writing.
+
+### Unverified
+
+Not yet run in Revit. Tested against a fake only: setting
+`ElementType.Name` (with `DB.Element.Name.__set__` as the fallback),
+reading it back through `SYMBOL_NAME_PARAM`, `WhereElementIsElementType`
+for the family list, `FamilyName` and `Family.IsInPlace`, the uniqueness
+key for system families, whether Revit compares type names ignoring
+case, and the window's ListBox and insert at the cursor.
 
 ## Update AVH: measured, not trusted
 
