@@ -30,6 +30,14 @@ and templates are not offered. Each sheet's name starts as its view's
 name, and the window is otherwise the same, with the count fixed at one
 sheet per view.
 
+"Place views" can instead align the new views to a view already on
+another sheet, picked from a list after Create sheets (with a sheet
+collection dropdown, as in Align Views). Each view is placed, then moved
+so the top left of its crop region is where the picked view's is, the
+way Align Views does it (lib/avh_viewports/corners.py). A view whose
+crop region is off stays in the middle and is reported. One that is
+moved but does not land within 0.1 mm makes the whole run roll back.
+
 ## Writing
 
 All the sheets are made in one transaction. Each one's number and name
@@ -46,6 +54,7 @@ the Rename Views window, which has run), `ViewSheet.Create`, and
 and for shift-click `Viewport.CanAddViewToSheet`, `Viewport.Create` and
 the middle of the sheet taken from the title block's bounding box in
 the sheet (falling back to `ViewSheet.Outline`, then the origin). The
+crop corner arithmetic is Align Views', which has run in Revit 2025. The
 collection each sheet ends up in is read back, so a set that Revit
 ignores rolls the run back rather than passing silently.
 Whether Revit compares sheet numbers ignoring case is not confirmed; the
@@ -72,6 +81,9 @@ if _LIB_DIR not in sys.path:
 
 from pyrevit import revit, DB, forms, script      # noqa: E402
 from avh_sheets import model                      # noqa: E402
+from avh_viewports import corners                 # noqa: E402
+from avh_viewports import model as viewports      # noqa: E402
+from avh_viewports import picker                  # noqa: E402
 from avh_schedules.compat import to_text          # noqa: E402
 
 output = script.get_output()
@@ -249,6 +261,79 @@ def choose_views(doc):
     return views, left_out
 
 
+class Placed(object):
+    """A view already on a sheet, to align the new views to."""
+
+    def __init__(self, doc, viewport, view, sheet):
+        self.viewport = viewport
+        self.view = view
+        self.sheet = sheet
+        self.collection = picker.collection_name(doc, sheet)
+        self.label = viewports.label(sheet.SheetNumber, sheet.Name,
+                                     view.Name)
+
+
+def placed_views(doc):
+    found = []
+    for viewport in DB.FilteredElementCollector(doc).OfClass(DB.Viewport):
+        view = safe(lambda: doc.GetElement(viewport.ViewId))
+        sheet = safe(lambda: doc.GetElement(viewport.SheetId))
+        if view is None or sheet is None:
+            continue
+        found.append(Placed(doc, viewport, view, sheet))
+    found.sort(key=lambda p: p.label)
+    return found
+
+
+def choose_alignment(doc):
+    """(corner, label) of the placed view the new views are aligned to,
+    or (None, why not) with why u"" when the person cancelled."""
+    placed = placed_views(doc)
+    if not placed:
+        return None, u"no view is on a sheet yet to align to"
+    source = picker.pick(forms, placed, False,
+                         TITLE + u": align the new views to which view?",
+                         u"Align to this")
+    if source is None:
+        return None, u""
+    corner, why = corners.crop_corner(source.view, source.viewport)
+    if corner is None:
+        return None, u"{0} cannot be aligned to: {1}".format(source.label,
+                                                            why)
+    return corner, source.label
+
+
+def align_placed(doc, placed, corner, notes):
+    """Move each placed (viewport, sheet, view, row) so its crop's top
+    left is on `corner`. Returns why it failed, or u"". A view whose crop
+    region is off has nothing to align by: it stays in the middle and is
+    noted. Any other view whose corner cannot be read stops the run."""
+    doc.Regenerate()
+    moved = []
+    for viewport, sheet, view, row in placed:
+        if not safe(lambda: view.CropBoxActive, False):
+            notes[row.number] = u"in the middle: its crop region is off"
+            continue
+        own, why = corners.crop_corner(view, viewport)
+        if own is None:
+            return (u"{0} could not be aligned, {1}, so no sheet was "
+                    u"made.".format(to_text(view.Name), why))
+        dx, dy = viewports.shift(corner, own)
+        centre = viewport.GetBoxCenter()
+        viewport.SetBoxCenter(DB.XYZ(centre.X + dx, centre.Y + dy,
+                                     centre.Z))
+        moved.append((viewport, view, row))
+    # The sheet transform follows the viewport only after a regenerate.
+    doc.Regenerate()
+    for viewport, view, row in moved:
+        after, why = corners.crop_corner(view, viewport)
+        if after is None or not viewports.landed(corner, after):
+            return (u"{0} did not land on the corner it was aligned to, "
+                    u"so no sheet was made.".format(to_text(view.Name)))
+        notes[row.number] = u"aligned"
+    return u""
+
+
 def sheet_middle(doc, sheet):
     """The middle of the sheet: of its title block, else of its outline,
     else the origin."""
@@ -298,11 +383,16 @@ def commit_checked(transaction):
     return (True if committed is None else status == committed), status
 
 
-def create(doc, symbol, rows, collection=None, views=None):
+def create(doc, symbol, rows, collection=None, views=None, align=None,
+           notes=None):
     """Make a sheet per row. `collection`: None, ("existing", element) or
     ("new", name) for the sheet collection they go into. `views`: None,
-    or a view per row to place in the middle of its sheet. Returns
+    or a view per row to place in the middle of its sheet; `align`:
+    None, or the sheet point to align each view's crop top left to.
+    `notes` gets how each view was placed, by sheet number. Returns
     (sheets, why): the sheets made, or [] and why none were."""
+    if notes is None:
+        notes = {}
     transaction = DB.Transaction(doc, TITLE)
     transaction.Start()
     current = None
@@ -352,6 +442,11 @@ def create(doc, symbol, rows, collection=None, views=None):
                 return [], (u"{0} did not go onto sheet {1}, so no sheet "
                             u"was made.".format(to_text(view.Name),
                                                 row.number))
+        if align is not None and placed:
+            why = align_placed(doc, placed, align, notes)
+            if why:
+                transaction.RollBack()
+                return [], why
         for sheet, row in made:
             got = (to_text(sheet.SheetNumber), to_text(sheet.Name))
             if got != (row.number, row.name):
@@ -379,22 +474,29 @@ def create(doc, symbol, rows, collection=None, views=None):
 
 
 def report(made, titleblock, collection_name=None, views=None,
-           left_out=()):
+           left_out=(), aligned_to=None, notes=None):
     where = (u" in the sheet collection {0}".format(collection_name)
              if collection_name else u"")
     lines = [u"### {0}".format(TITLE),
              u"{0} sheet(s) made with {1}{2}.".format(len(made), titleblock,
                                                      where)]
     if views is not None:
-        lines[-1] += (u" Each view is in the middle of its sheet, to be "
-                      u"moved into place.")
-        lines += [u"", u"| | Number | Name | View |",
-                  u"| :--- | :--- | :--- | :--- |"]
+        notes = notes or {}
+        if aligned_to:
+            lines[-1] += u" The views are aligned to {0}.".format(aligned_to)
+            middle = u"aligned"
+        else:
+            lines[-1] += (u" Each view is in the middle of its sheet, to "
+                          u"be moved into place.")
+            middle = u"middle"
+        lines += [u"", u"| | Number | Name | View | Placed |",
+                  u"| :--- | :--- | :--- | :--- | :--- |"]
         for (sheet, row), view in zip(made, views):
-            lines.append(u"| {0} | {1} | {2} | {3} |".format(
+            lines.append(u"| {0} | {1} | {2} | {3} | {4} |".format(
                 output.linkify(sheet.Id), row.number.replace(u"|", u"/"),
                 row.name.replace(u"|", u"/"),
-                view.label.replace(u"|", u"/")))
+                view.label.replace(u"|", u"/"),
+                notes.get(row.number, middle).replace(u"|", u"/")))
     else:
         lines += [u"", u"| | Number | Name |", u"| :--- | :--- | :--- |"]
         for sheet, row in made:
@@ -490,12 +592,23 @@ def run():
             collection_name, element = collections[value]
             collection = (u"existing", element)
 
+    align, aligned_to = None, None
+    if views and answer.get("align"):
+        align, aligned_to = choose_alignment(doc)
+        if align is None:
+            if aligned_to:
+                forms.alert(u"No sheet was made: " + aligned_to + u".",
+                            title=TITLE)
+            return
+
+    notes = {}
     made, why = create(doc, symbol, rows, collection,
-                       [v.element for v in views] if views else None)
+                       [v.element for v in views] if views else None,
+                       align, notes)
     if why:
         forms.alert(why, title=TITLE)
         return
-    report(made, label, collection_name, views, left_out)
+    report(made, label, collection_name, views, left_out, aligned_to, notes)
 
 
 if __name__ == "__main__":

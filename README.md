@@ -9,7 +9,7 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.57.0.** The authoritative number is `__version__` in
+**Version 2.58.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
 
 ## Install
@@ -139,7 +139,11 @@ the Project Browser, or, with none selected, ticked in a list. Each
 view is placed in the middle of its sheet's title block, to be moved
 into place by hand, and each sheet is named after its view to begin
 with. Views already on a sheet are left out and named; schedules,
-legends and templates are not offered.
+legends and templates are not offered. "Place views" can instead
+align the new views to a view already on another sheet, picked after
+Create sheets: each crop region's top left goes where that view's is,
+as Align Views does it. A view whose crop region is off stays in the
+middle and is noted.
 
 **Batch Dependents.** Makes a number of dependent
 views under each chosen view at once. Select the parent views in the
@@ -728,7 +732,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.54.0 | Align Views and Align Titles: a sheet collection dropdown in their view lists; ticks are kept across collections | Ran in Revit 2025 |
 | 2.55.0 | Data panel: Renumber, one text or whole number instance parameter numbered across selected or picked elements as prefix + running number + suffix, in the order picked or by position; a leading zero start keeps its width (#QQC001 to #QQC999); optionally only elements with no value, skipping numbers in use | Tried in Revit 2025 |
 | 2.56.0 | Data panel: Rename Types, family types renamed from their own parameter values with a pattern such as `{Width}x{Height} {Material}`, for the selected elements' types or every type of ticked families; clashes within a family shown before writing, swaps allowed | Not yet run in Revit |
-| 2.57.0 | Batch Sheets shift-click: a sheet for each selected (or ticked) view, the view placed in the middle of the title block | Ran in Revit 2025; current |
+| 2.57.0 | Batch Sheets shift-click: a sheet for each selected (or ticked) view, the view placed in the middle of the title block | Ran in Revit 2025 |
+| 2.58.0 | Batch Sheets shift-click: the new views can be aligned to a view on another sheet by the top left of the crop region, as Align Views does; that crop corner code now lives in `lib/avh_viewports/corners.py`, shared by both | Not yet run in Revit; current |
 
 ## Licence
 

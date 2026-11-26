@@ -19,7 +19,8 @@ you type like the sheet names are.
 
 Given views (shift-click), the window makes one sheet per view: the
 count is fixed, each row shows its view, and each name field starts as
-the view's name.
+the view's name. A "Place views" choice puts each view in the middle of
+its sheet, or aligned to a view on another sheet, picked after Create.
 
 Revit and WPF only, so nothing here runs outside Revit and the test
 harness puts a stand in for this module. What it shows comes from
@@ -36,7 +37,7 @@ clr.AddReference("WindowsBase")
 
 from System.Windows import GridLength, GridUnitType, Thickness  # noqa: E402
 from System.Windows import FontWeights, TextWrapping            # noqa: E402
-from System.Windows import VerticalAlignment                    # noqa: E402
+from System.Windows import VerticalAlignment, Visibility        # noqa: E402
 from System.Windows.Controls import (                           # noqa: E402
     ColumnDefinition, RowDefinition, TextBlock, TextBox, Grid)
 from System.Windows.Media import Brushes                        # noqa: E402
@@ -81,6 +82,15 @@ XAML = u"""
       <TextBlock Grid.Column="2" Text="new collection name"
                  Margin="12,0,6,0" VerticalAlignment="Center"/>
       <TextBox Grid.Column="3" x:Name="new_collection_box" Padding="3"/>
+    </Grid>
+    <Grid DockPanel.Dock="Top" Margin="0,0,0,8" x:Name="place_row">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="110"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" Text="Place views"
+                 VerticalAlignment="Center"/>
+      <ComboBox Grid.Column="1" x:Name="place_box" Padding="3"/>
     </Grid>
     <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
       <Grid.ColumnDefinitions>
@@ -147,6 +157,9 @@ DEFAULT_NAME = u"Unnamed"
 NO_COLLECTION = u"(none)"
 NEW_COLLECTION = u"New sheet collection..."
 NO_COLLECTIONS_HERE = u"(this Revit version has no sheet collections)"
+PLACE_MIDDLE = u"In the middle of each sheet"
+PLACE_ALIGNED = (u"Aligned to a view on another sheet (picked after "
+                 u"Create sheets)")
 
 
 class BatchSheetsWindow(forms.WPFWindow):
@@ -188,7 +201,12 @@ class BatchSheetsWindow(forms.WPFWindow):
         self.start_box.Text = number[1]
         self.number_suffix_box.Text = number[2]
         self.count_box.Text = to_text(count)
-        if views is not None:
+        self.place_box.Items.Add(PLACE_MIDDLE)
+        self.place_box.Items.Add(PLACE_ALIGNED)
+        self.place_box.SelectedIndex = 0
+        if views is None:
+            self.place_row.Visibility = Visibility.Collapsed
+        else:
             self.count_box.IsEnabled = False
             self.Title = u"Batch Sheets: a sheet for each view"
         self.rebuild()
@@ -376,7 +394,9 @@ class BatchSheetsWindow(forms.WPFWindow):
         self.result = dict(
             titleblock=self.titleblock_box.SelectedIndex,
             values=self.values(),
-            collection=self.collection())
+            collection=self.collection(),
+            align=(self.views is not None and
+                   self.place_box.SelectedIndex == 1))
         self.Close()
 
     def on_cancel(self, sender, args):
@@ -388,7 +408,8 @@ def ask(titleblocks, chosen, number, count, evaluate, collections=None,
         views=None, names=None):
     """{"titleblock": index, "values": (number_prefix, number_fields,
     number_suffix, name_prefix, name_fields, name_suffix), "collection":
-    None, ("existing", index) or ("new", name)} as left when Create was
+    None, ("existing", index) or ("new", name), "align": True to align
+    the placed views to a view picked next} as left when Create was
     pressed, or None."""
     window = BatchSheetsWindow(titleblocks, chosen, number, count, evaluate,
                                collections, views, names)

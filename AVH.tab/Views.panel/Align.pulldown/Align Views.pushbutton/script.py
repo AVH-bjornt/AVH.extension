@@ -13,7 +13,7 @@ past the crop, so two views with identical crops can have different
 boxes, and aligning boxes would put the drawings themselves out of
 line. The crop region is where the drawing is.
 
-## How the corner is found
+## How the corner is found (lib/avh_viewports/corners.py)
 
 Revit 2023 added two transforms: `View.GetModelToProjectionTransforms`
 gives, for each crop region of a view, its boundary in the model and the
@@ -62,6 +62,7 @@ if _LIB_DIR not in sys.path:
 from pyrevit import revit, DB, forms, script      # noqa: E402
 from avh_viewports import model                   # noqa: E402
 from avh_viewports import picker                  # noqa: E402
+from avh_viewports import corners                 # noqa: E402
 from avh_schedules.compat import to_text          # noqa: E402
 
 output = script.get_output()
@@ -118,39 +119,7 @@ def pick(placed, multiselect, title, button):
 def crop_corner(placed):
     """(x, y) on the sheet of the top left of the view's crop, or a
     reason it could not be found, as (None, reason)."""
-    view = placed.view
-    try:
-        if not view.CropBoxActive:
-            return None, u"its crop region is off"
-    except BaseException:
-        return None, u"it has no crop region"
-    try:
-        regions = list(view.GetModelToProjectionTransforms())
-        to_sheet = placed.viewport.GetProjectionToSheetTransform()
-    except BaseException as exc:
-        return None, u"Revit would not give its transforms: {0}".format(
-            to_text(exc))
-    points = []
-    for region in regions:
-        try:
-            to_projection = region.GetModelToProjectionTransform()
-            boundary = region.GetBoundary()
-        except BaseException as exc:
-            logger.debug(to_text(exc))
-            continue
-        if boundary is None:
-            continue
-        for curve in boundary:
-            try:
-                for point in curve.Tessellate():
-                    on_sheet = to_sheet.OfPoint(to_projection.OfPoint(point))
-                    points.append((on_sheet.X, on_sheet.Y))
-            except BaseException as exc:
-                logger.debug(to_text(exc))
-    corner = model.top_left(points)
-    if corner is None:
-        return None, u"its crop boundary could not be read"
-    return corner, u""
+    return corners.crop_corner(placed.view, placed.viewport)
 
 
 def is_pinned(element):

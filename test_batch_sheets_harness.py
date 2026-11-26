@@ -71,21 +71,91 @@ class FakeXYZ(object):
         self.X, self.Y, self.Z = x, y, z
 
 
+class Shift(object):
+    """A transform that scales then translates, in plan."""
+
+    def __init__(self, scale, dx, dy):
+        self.scale, self.dx, self.dy = scale, dx, dy
+
+    def OfPoint(self, point):
+        return FakeXYZ(point.X * self.scale + self.dx,
+                       point.Y * self.scale + self.dy, 0.0)
+
+
+class FakeLine(object):
+    def __init__(self, a, b):
+        self.a, self.b = a, b
+
+    def Tessellate(self):
+        return [FakeXYZ(self.a[0], self.a[1], 0.0),
+                FakeXYZ(self.b[0], self.b[1], 0.0)]
+
+
+def rectangle(x0, y0, x1, y1):
+    return [FakeLine((x0, y0), (x1, y0)), FakeLine((x1, y0), (x1, y1)),
+            FakeLine((x1, y1), (x0, y1)), FakeLine((x0, y1), (x0, y0))]
+
+
 class FakeView(object):
-    def __init__(self, doc, value, name, view_type, template=False):
+    """`crops`: model rectangles in feet; `scale`: the view's scale."""
+
+    def __init__(self, doc, value, name, view_type, template=False,
+                 crops=((0.0, 0.0, 30.0, 20.0),), scale=100, crop=True):
         self.Id = FakeId(value)
         self.Name = name
         self.ViewType = view_type
         self.IsTemplate = template
+        self.crops = crops
+        self.scale = scale
+        self.CropBoxActive = crop
         doc.views.append(self)
+
+    def GetModelToProjectionTransforms(self):
+        return [Namespace(
+            GetModelToProjectionTransform=lambda s=self.scale:
+                Shift(1.0 / s, 0.0, 0.0),
+            GetBoundary=lambda c=c: rectangle(*c)) for c in self.crops]
 
 
 class FakeViewport(object):
-    def __init__(self, doc, sheet_id, view_id, point):
+    """`box_offset`: how far the box centre sits from where the crop is
+    drawn from, in sheet feet: annotations reaching past the crop."""
+
+    def __init__(self, doc, sheet_id, view_id, point, box_offset=(0.0, 0.0),
+                 regenerated=False):
+        self.doc = doc
         self.SheetId = sheet_id
         self.ViewId = view_id
-        self.point = point
+        self.point = point if point is not None else FakeXYZ(0.0, 0.0, 0.0)
+        self.box_offset = box_offset
+        # Revit works the sheet transform out on regeneration.
+        self.regenerated = ((self.point.X, self.point.Y) if regenerated
+                            else None)
         doc.viewports.append(self)
+
+    def GetBoxCenter(self):
+        return FakeXYZ(self.point.X, self.point.Y, 0.0)
+
+    def SetBoxCenter(self, point):
+        self.point = FakeXYZ(point.X, point.Y, 0.0)
+
+    def GetProjectionToSheetTransform(self):
+        if self.regenerated is None:
+            raise Exception("The viewport has not been regenerated.")
+        return Shift(1.0, self.regenerated[0] - self.box_offset[0],
+                     self.regenerated[1] - self.box_offset[1])
+
+    def crop_top_left(self):
+        """Where the crop's top left truly is now."""
+        view = [v for v in self.doc.views if v.Id == self.ViewId][0]
+        points = []
+        for crop in view.crops:
+            for x, y in ((crop[0], crop[3]), (crop[2], crop[1])):
+                points.append((x / view.scale + self.point.X -
+                               self.box_offset[0],
+                               y / view.scale + self.point.Y -
+                               self.box_offset[1]))
+        return (min(p[0] for p in points), max(p[1] for p in points))
 
     @staticmethod
     def CanAddViewToSheet(doc, sheet_id, view_id):
@@ -231,6 +301,8 @@ class FakeDoc(object):
         self.selected = []
         self.unplaceable = set()
         self.viewport_none = False
+        self.regenerate_works = True
+        self.regenerations_left = None
         self.dirty = False
         self.has_collections = has_collections
         self.ignore_collection = ignore_collection
@@ -251,6 +323,19 @@ class FakeDoc(object):
 
     def Regenerate(self):
         self.dirty = False
+        if self.regenerate_works:
+            if self.regenerations_left is not None:
+                if self.regenerations_left <= 0:
+                    return
+                self.regenerations_left -= 1
+            for viewport in self.viewports:
+                viewport.regenerated = (viewport.point.X, viewport.point.Y)
+
+    def GetElement(self, element_id):
+        for element in self.views + self.sheets + self.collections:
+            if element.Id == element_id:
+                return element
+        return None
 
     def numbers(self):
         return sorted(s._number for s in self.sheets)
@@ -266,12 +351,16 @@ class FakeTransaction(object):
                        for s in self.doc.sheets],
                       [(s, s.IsActive) for s in self.doc.symbols],
                       list(self.doc.collections),
-                      list(self.doc.placed), list(self.doc.viewports))
+                      list(self.doc.placed), list(self.doc.viewports),
+                      [(v, v.point, v.regenerated)
+                       for v in self.doc.viewports])
         self.doc.log.append("start")
 
     def RollBack(self):
         (sheets, values, symbols, collections, placed,
-         viewports) = self.saved
+         viewports, spots) = self.saved
+        for viewport, point, regenerated in spots:
+            viewport.point, viewport.regenerated = point, regenerated
         self.doc.sheets[:] = sheets
         self.doc.collections[:] = collections
         self.doc.placed[:] = placed
@@ -322,9 +411,11 @@ class Recorder(object):
     """`answer(labels, chosen, number, count, evaluate)` plays the person
     at the window; returning None is pressing Cancel."""
 
-    def __init__(self, answer=None, ticks=None):
+    def __init__(self, answer=None, ticks=None, align_to=None):
         self.answer = answer
         self.ticks = ticks
+        self.align_to = align_to
+        self.align_offered = None
         self.picked_from = None
         self.alerts = []
         self.printed = []
@@ -344,6 +435,11 @@ class Recorder(object):
         self.alerts.append(message)
 
     def pick(self, labels, **kwargs):
+        if u"align" in kwargs.get("title", u""):
+            self.align_offered = list(labels)
+            if self.align_to is None:
+                return None
+            return [label for label in labels if self.align_to in label]
         self.picked_from = list(labels)
         if self.ticks is None:
             return None
@@ -689,18 +785,19 @@ def model_with_views(**kwargs):
                           template=True),
         placed=FakeView(doc, 207, u"Grunnmynd", u"FloorPlan"))
     sheet_101 = [sh for sh in doc.sheets if sh._number == u"A-101"][0]
-    FakeViewport(doc, sheet_101.Id, views["placed"].Id, None)
+    FakeViewport(doc, sheet_101.Id, views["placed"].Id,
+                 FakeXYZ(0.5, 0.4, 0.0), regenerated=True)
     return doc, a1, a3, views
 
 
-def from_views(recorder, titleblock=None):
+def from_views(recorder, titleblock=None, align=False):
     """A person who keeps the suggested numbers and the views' names."""
     def answer(labels, chosen, number, count, evaluate):
         return dict(
             titleblock=chosen if titleblock is None else titleblock,
             values=(number[0], naming.numbers(count, number[1]),
                     number[2], u"", list(recorder.window.names), u""),
-            collection=None)
+            collection=None, align=align)
     recorder.answer = answer
     return recorder
 
@@ -811,6 +908,104 @@ rec = run_script(doc, Recorder(batch(1)))
 check("views: without shift, a selected view is not placed",
       rec.window and rec.window.views is None and
       viewport_of(doc, views["haed1"]) is None and len(doc.numbers()) == 5)
+
+# 12. Shift-click, aligned to a view on another sheet.
+def aligned_model(**kwargs):
+    doc, a1, a3, views = model_with_views(**kwargs)
+    # Other crops, scales and annotation offsets than the source's, so
+    # lining up the boxes or the middles would not line up the crops.
+    views["haed1"].crops = ((10.0, 5.0, 40.0, 25.0),)
+    views["haed1"].scale = 50
+    views["haed2"].crops = ((-20.0, -10.0, 15.0, 30.0),)
+    return doc, a1, a3, views
+
+
+SOURCE_CORNER = (0.5, 0.6)   # the placed view: centre (0.5, 0.4), crop top 0.2
+
+doc, a1, a3, views = aligned_model()
+doc.selected = [views["haed1"].Id, views["haed2"].Id]
+rec = run_script(doc, from_views(Recorder(align_to=u"Grunnmynd"),
+                                 align=True), shift=True)
+check("align: the views on sheets are offered to align to",
+      rec.align_offered and any(u"A-101" in label and u"Grunnmynd" in label
+                                for label in rec.align_offered),
+      rec.align_offered)
+spots = [viewport_of(doc, views[k]) for k in (u"haed1", u"haed2")]
+check("align: each new view's crop top left is on the picked view's",
+      all(spots) and all(abs(v.crop_top_left()[0] - SOURCE_CORNER[0]) < 1e-6
+                         and abs(v.crop_top_left()[1] - SOURCE_CORNER[1])
+                         < 1e-6 for v in spots),
+      [v.crop_top_left() for v in spots if v])
+check("align: the sheets are made, the views on their own sheets",
+      len(doc.numbers()) == 6 and
+      [sheet_by_id(doc, v.SheetId)._number for v in spots if v] ==
+      [u"A-902", u"A-903"])
+check("align: the report says what they were aligned to",
+      u"aligned to A-101" in rec.text() and u"| aligned |" in rec.text(),
+      rec.text())
+
+doc, a1, a3, views = aligned_model()
+views["haed2"].CropBoxActive = False
+doc.selected = [views["haed1"].Id, views["haed2"].Id]
+rec = run_script(doc, from_views(Recorder(align_to=u"Grunnmynd"),
+                                 align=True), shift=True)
+spot = viewport_of(doc, views["haed2"])
+check("align: a view with its crop off stays in the middle, noted",
+      spot is not None and abs(spot.point.X + 0.69) < 1e-9 and
+      u"in the middle: its crop region is off" in rec.text(), rec.text())
+check("align: the others are still aligned",
+      viewport_of(doc, views["haed1"]) is not None and
+      abs(viewport_of(doc, views["haed1"]).crop_top_left()[1] -
+          SOURCE_CORNER[1]) < 1e-6)
+
+doc, a1, a3, views = aligned_model()
+doc.selected = [views["haed1"].Id]
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder(), align=True), shift=True)
+check("align: cancelling the pick makes nothing",
+      rec.align_offered and doc.numbers() == before and doc.log == [],
+      doc.log)
+
+doc, a1, a3, views = aligned_model()
+views["placed"].CropBoxActive = False
+doc.selected = [views["haed1"].Id]
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder(align_to=u"Grunnmynd"),
+                                 align=True), shift=True)
+check("align: a picked view with no crop: said so, nothing made",
+      doc.numbers() == before and doc.log == [] and
+      u"cannot be aligned to" in rec.text(), rec.text())
+
+doc, a1, a3, views = aligned_model()
+doc.selected = [views["haed1"].Id]
+# Regenerates for the placing, but not after the move: the corner read
+# back is stale.
+doc.regenerations_left = 2
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder(align_to=u"Grunnmynd"),
+                                 align=True), shift=True)
+check("align: a view that does not land rolls everything back",
+      doc.numbers() == before and len(doc.viewports) == 1 and
+      u"did not land" in rec.text(), rec.text())
+
+doc, a1, a3, views = aligned_model()
+doc.selected = [views["haed1"].Id]
+doc.regenerate_works = False
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder(align_to=u"Grunnmynd"),
+                                 align=True), shift=True)
+check("align: a corner that cannot be read stops the run, not the middle",
+      doc.numbers() == before and len(doc.viewports) == 1 and
+      u"could not be aligned" in rec.text(), rec.text())
+
+doc, a1, a3, views = aligned_model()
+doc.selected = [views["haed1"].Id]
+rec = run_script(doc, from_views(Recorder(align_to=u"Grunnmynd")),
+                 shift=True)
+spot = viewport_of(doc, views["haed1"])
+check("align: not chosen, no pick and the view stays in the middle",
+      rec.align_offered is None and spot is not None and
+      abs(spot.point.X + 0.69) < 1e-9)
 
 # --------------------------------------------------------------------------
 
