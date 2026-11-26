@@ -17,6 +17,10 @@ The sheets can go into a sheet collection: none, one already in the
 model, or a new one named here. A new collection's name is checked as
 you type like the sheet names are.
 
+Given views (shift-click), the window makes one sheet per view: the
+count is fixed, each row shows its view, and each name field starts as
+the view's name.
+
 Revit and WPF only, so nothing here runs outside Revit and the test
 harness puts a stand in for this module. What it shows comes from
 `evaluate`, which the script passes in and the harness does test. Built
@@ -137,6 +141,8 @@ XAML = u"""
 HEADINGS = (u"Number field", u"Sheet number", u"Name field", u"Sheet name")
 WIDTHS = ((0.7, GridUnitType.Star), (1, GridUnitType.Star),
           (1.2, GridUnitType.Star), (1.6, GridUnitType.Star))
+VIEW_HEADING = u"View"
+VIEW_WIDTH = (1.4, GridUnitType.Star)
 DEFAULT_NAME = u"Unnamed"
 NO_COLLECTION = u"(none)"
 NEW_COLLECTION = u"New sheet collection..."
@@ -149,12 +155,15 @@ class BatchSheetsWindow(forms.WPFWindow):
     `evaluate(number_prefix, number_fields, number_suffix, name_prefix,
     name_fields, name_suffix)` returns model rows. `collections`: the
     names of the model's sheet collections, or None where this Revit has
-    none."""
+    none. `views`: labels of the views to put one per sheet, or None;
+    `names`: the name field each row starts with."""
 
     def __init__(self, titleblocks, chosen, number, count, evaluate,
-                 collections=None):
+                 collections=None, views=None, names=None):
         forms.WPFWindow.__init__(self, XAML, literal_string=True)
         self.evaluate = evaluate
+        self.views = views
+        self.start_names = list(names or [])
         self.collections = collections
         if collections is None:
             self.collection_box.Items.Add(NO_COLLECTIONS_HERE)
@@ -179,6 +188,9 @@ class BatchSheetsWindow(forms.WPFWindow):
         self.start_box.Text = number[1]
         self.number_suffix_box.Text = number[2]
         self.count_box.Text = to_text(count)
+        if views is not None:
+            self.count_box.IsEnabled = False
+            self.Title = u"Batch Sheets: a sheet for each view"
         self.rebuild()
         for box in (self.number_prefix_box, self.number_suffix_box,
                     self.name_prefix_box, self.name_suffix_box):
@@ -232,16 +244,23 @@ class BatchSheetsWindow(forms.WPFWindow):
         numbers = model.fields(count, to_text(self.start_box.Text),
                                [to_text(b.Text) for b in self.number_boxes],
                                u"")
+        typed = [to_text(b.Text) for b in self.name_boxes]
+        if not self.name_boxes:
+            typed = self.start_names
         names = model.fields(count, to_text(self.name_start_box.Text),
-                             [to_text(b.Text) for b in self.name_boxes],
-                             DEFAULT_NAME)
+                             typed, DEFAULT_NAME)
+        headings, widths, first = HEADINGS, WIDTHS, 0
+        if self.views is not None:
+            headings = (VIEW_HEADING,) + HEADINGS
+            widths = (VIEW_WIDTH,) + WIDTHS
+            first = 1
         grid = self.rows_grid
         for box in self.number_boxes + self.name_boxes:
             box.TextChanged -= self.on_changed
         grid.Children.Clear()
         grid.RowDefinitions.Clear()
         grid.ColumnDefinitions.Clear()
-        for size, unit in WIDTHS:
+        for size, unit in widths:
             column = ColumnDefinition()
             column.Width = GridLength(size, unit)
             grid.ColumnDefinitions.Add(column)
@@ -249,7 +268,7 @@ class BatchSheetsWindow(forms.WPFWindow):
             row = RowDefinition()
             row.Height = GridLength(1, GridUnitType.Auto)
             grid.RowDefinitions.Add(row)
-        for column, heading in enumerate(HEADINGS):
+        for column, heading in enumerate(headings):
             self._cell(0, column, self._text(heading, bold=True))
         self.number_boxes, self.name_boxes = [], []
         self.number_blocks, self.name_blocks = [], []
@@ -258,10 +277,12 @@ class BatchSheetsWindow(forms.WPFWindow):
             name_box = self._box(names[index])
             number_block = self._text(u"")
             name_block = self._text(u"")
-            self._cell(index + 1, 0, number_box)
-            self._cell(index + 1, 1, number_block)
-            self._cell(index + 1, 2, name_box)
-            self._cell(index + 1, 3, name_block)
+            if first:
+                self._cell(index + 1, 0, self._text(self.views[index]))
+            self._cell(index + 1, first, number_box)
+            self._cell(index + 1, first + 1, number_block)
+            self._cell(index + 1, first + 2, name_box)
+            self._cell(index + 1, first + 3, name_block)
             self.number_boxes.append(number_box)
             self.name_boxes.append(name_box)
             self.number_blocks.append(number_block)
@@ -363,12 +384,13 @@ class BatchSheetsWindow(forms.WPFWindow):
         self.Close()
 
 
-def ask(titleblocks, chosen, number, count, evaluate, collections=None):
+def ask(titleblocks, chosen, number, count, evaluate, collections=None,
+        views=None, names=None):
     """{"titleblock": index, "values": (number_prefix, number_fields,
     number_suffix, name_prefix, name_fields, name_suffix), "collection":
     None, ("existing", index) or ("new", name)} as left when Create was
     pressed, or None."""
     window = BatchSheetsWindow(titleblocks, chosen, number, count, evaluate,
-                               collections)
+                               collections, views, names)
     window.ShowDialog()
     return window.result

@@ -66,8 +66,46 @@ class FakeId(object):
 INVALID = FakeId(-1)
 
 
+class FakeXYZ(object):
+    def __init__(self, x, y, z):
+        self.X, self.Y, self.Z = x, y, z
+
+
+class FakeView(object):
+    def __init__(self, doc, value, name, view_type, template=False):
+        self.Id = FakeId(value)
+        self.Name = name
+        self.ViewType = view_type
+        self.IsTemplate = template
+        doc.views.append(self)
+
+
+class FakeViewport(object):
+    def __init__(self, doc, sheet_id, view_id, point):
+        self.SheetId = sheet_id
+        self.ViewId = view_id
+        self.point = point
+        doc.viewports.append(self)
+
+    @staticmethod
+    def CanAddViewToSheet(doc, sheet_id, view_id):
+        if view_id in doc.unplaceable:
+            return False
+        return not any(v.ViewId == view_id for v in doc.viewports)
+
+    @staticmethod
+    def Create(doc, sheet_id, view_id, point):
+        if not FakeViewport.CanAddViewToSheet(doc, sheet_id, view_id):
+            raise Exception("The view cannot be added to the sheet.")
+        if doc.viewport_none:
+            return None
+        return FakeViewport(doc, sheet_id, view_id, point)
+
+
 class FakeSymbol(object):
-    def __init__(self, doc, value, family, name, active=True):
+    def __init__(self, doc, value, family, name, active=True,
+                 size=(2.0, 1.0)):
+        self.size = size
         self.Id = FakeId(value)
         self.FamilyName = family
         self.Name = name
@@ -79,8 +117,19 @@ class FakeSymbol(object):
 
 
 class FakeTitleBlock(object):
-    def __init__(self, type_id):
+    def __init__(self, type_id, doc=None, owner=None, size=(2.0, 1.0)):
         self.type_id = type_id
+        self.doc = doc
+        self.owner = owner
+        self.size = size
+
+    def get_BoundingBox(self, view):
+        # Like Revit: a title block placed since the last regenerate has
+        # no size yet.
+        if self.doc is not None and self.doc.dirty:
+            return None
+        return Namespace(Min=FakeXYZ(-self.size[0], 0.0, 0.0),
+                         Max=FakeXYZ(0.0, self.size[1], 0.0))
 
     def GetTypeId(self):
         return self.type_id
@@ -115,6 +164,8 @@ class FakeViewSheet(object):
         self._name = name
         self.type_id = type_id
         self._collection = INVALID
+        self.ViewType = u"DrawingSheet"
+        self.IsTemplate = False
         doc.sheets.append(self)
 
     @staticmethod
@@ -124,7 +175,12 @@ class FakeViewSheet(object):
             if not symbol.IsActive:
                 raise Exception("The symbol is not active.")
         auto = u"auto-{0}".format(FakeViewSheet.created + 1)
-        return FakeViewSheet(doc, auto, u"Unnamed", type_id)
+        sheet = FakeViewSheet(doc, auto, u"Unnamed", type_id)
+        if type_id != INVALID:
+            doc.placed.append(FakeTitleBlock(type_id, doc, sheet.Id,
+                                             symbol.size))
+            doc.dirty = True
+        return sheet
 
     @property
     def SheetNumber(self):
@@ -170,6 +226,12 @@ class FakeDoc(object):
                  ignore_collection=False):
         self.sheets = []
         self.collections = []
+        self.views = []
+        self.viewports = []
+        self.selected = []
+        self.unplaceable = set()
+        self.viewport_none = False
+        self.dirty = False
         self.has_collections = has_collections
         self.ignore_collection = ignore_collection
         self.symbols = []
@@ -187,6 +249,9 @@ class FakeDoc(object):
             self.placed.append(FakeTitleBlock(symbol.Id))
         return sheet
 
+    def Regenerate(self):
+        self.dirty = False
+
     def numbers(self):
         return sorted(s._number for s in self.sheets)
 
@@ -200,13 +265,17 @@ class FakeTransaction(object):
                       [(s, s._number, s._name, s._collection)
                        for s in self.doc.sheets],
                       [(s, s.IsActive) for s in self.doc.symbols],
-                      list(self.doc.collections))
+                      list(self.doc.collections),
+                      list(self.doc.placed), list(self.doc.viewports))
         self.doc.log.append("start")
 
     def RollBack(self):
-        sheets, values, symbols, collections = self.saved
+        (sheets, values, symbols, collections, placed,
+         viewports) = self.saved
         self.doc.sheets[:] = sheets
         self.doc.collections[:] = collections
+        self.doc.placed[:] = placed
+        self.doc.viewports[:] = viewports
         for sheet, number, name, collection in values:
             sheet._number, sheet._name = number, name
             sheet._collection = collection
@@ -222,8 +291,9 @@ class FakeTransaction(object):
 
 
 class FakeCollector(object):
-    def __init__(self, doc):
+    def __init__(self, doc, view_id=None):
         self.doc = doc
+        self.view_id = view_id
         self.category = None
 
     def OfCategory(self, category):
@@ -234,11 +304,17 @@ class FakeCollector(object):
         return iter(list(self.doc.symbols))
 
     def WhereElementIsNotElementType(self):
-        return iter(list(self.doc.placed))
+        return iter([b for b in self.doc.placed
+                     if self.view_id is None or b.owner == self.view_id])
 
     def OfClass(self, cls):
         if cls is FakeSheetCollection:
             return iter(list(self.doc.collections))
+        if cls is FakeViewport:
+            return iter(list(self.doc.viewports))
+        if cls is FakeView:
+            # Revit's View class includes sheets.
+            return iter(list(self.doc.views) + list(self.doc.sheets))
         return iter(list(self.doc.sheets))
 
 
@@ -246,22 +322,33 @@ class Recorder(object):
     """`answer(labels, chosen, number, count, evaluate)` plays the person
     at the window; returning None is pressing Cancel."""
 
-    def __init__(self, answer=None):
+    def __init__(self, answer=None, ticks=None):
         self.answer = answer
+        self.ticks = ticks
+        self.picked_from = None
         self.alerts = []
         self.printed = []
         self.window = None
 
-    def ask(self, labels, chosen, number, count, evaluate, collections):
+    def ask(self, labels, chosen, number, count, evaluate, collections,
+            views=None, names=None):
         self.window = Namespace(labels=labels, chosen=chosen, number=number,
                                 count=count, evaluate=evaluate,
-                                collections=collections)
+                                collections=collections, views=views,
+                                names=names)
         if self.answer is None:
             return None
         return self.answer(labels, chosen, number, count, evaluate)
 
     def alert(self, message, **kwargs):
         self.alerts.append(message)
+
+    def pick(self, labels, **kwargs):
+        self.picked_from = list(labels)
+        if self.ticks is None:
+            return None
+        return [label for label in labels
+                if any(tick in label for tick in self.ticks)]
 
     def print_md(self, text):
         self.printed.append(text)
@@ -270,12 +357,15 @@ class Recorder(object):
         return u"\n".join(self.alerts + self.printed)
 
 
-def run_script(doc, recorder):
+def run_script(doc, recorder, shift=False):
     db = Namespace(
         FilteredElementCollector=FakeCollector,
         BuiltInCategory=Namespace(OST_TitleBlocks="OST_TitleBlocks"),
         BuiltInParameter=Namespace(SYMBOL_NAME_PARAM="SYMBOL_NAME_PARAM"),
         ViewSheet=FakeViewSheet,
+        View=FakeView,
+        Viewport=FakeViewport,
+        XYZ=FakeXYZ,
         ElementId=Namespace(InvalidElementId=INVALID),
         Transaction=FakeTransaction,
         TransactionStatus=Namespace(Committed="Committed"),
@@ -283,9 +373,11 @@ def run_script(doc, recorder):
     if doc.has_collections:
         db.SheetCollection = FakeSheetCollection
     pyrevit = types.ModuleType("pyrevit")
-    pyrevit.revit = Namespace(doc=doc)
+    pyrevit.revit = Namespace(doc=doc, uidoc=Namespace(
+        Selection=Namespace(GetElementIds=lambda: list(doc.selected))))
     pyrevit.DB = db
-    pyrevit.forms = Namespace(alert=recorder.alert)
+    pyrevit.forms = Namespace(alert=recorder.alert,
+                              SelectFromList=Namespace(show=recorder.pick))
     pyrevit.script = Namespace(
         get_output=lambda: Namespace(
             print_md=recorder.print_md,
@@ -298,7 +390,8 @@ def run_script(doc, recorder):
     sys.modules["avh_sheets.window"] = window
     avh_sheets.window = window
     try:
-        runpy.run_path(SCRIPT, run_name="__main__")
+        runpy.run_path(SCRIPT, run_name="__main__",
+                       init_globals={"__shiftclick__": shift})
     except Exception as exc:
         recorder.alerts.append(u"<script raised {0!r}>".format(exc))
     finally:
@@ -328,8 +421,8 @@ def batch(count, start=None, names=None, titleblock=None,
 
 def model_with_sheets(**kwargs):
     doc = FakeDoc(**kwargs)
-    a3 = FakeSymbol(doc, 11, u"AVH Titill", u"A3")
-    a1 = FakeSymbol(doc, 12, u"AVH Titill", u"A1")
+    a3 = FakeSymbol(doc, 11, u"AVH Titill", u"A3", size=(1.38, 0.97))
+    a1 = FakeSymbol(doc, 12, u"AVH Titill", u"A1", size=(2.76, 1.95))
     # A3 is the most used, and sorts second, so "most used" and "first
     # in the list" give different answers.
     doc.sheet(u"A-101", u"Grunnmynd 1", a3)
@@ -582,6 +675,142 @@ rec = run_script(doc, Recorder(batch(1)))
 check("collection: a Revit without them offers none and still makes sheets",
       rec.window and rec.window.collections is None and
       len(doc.numbers()) == 5, rec.text())
+
+# 11. Shift-click: a sheet for each view, the view in the middle.
+def model_with_views(**kwargs):
+    doc, a1, a3 = model_with_sheets(**kwargs)
+    views = dict(
+        haed1=FakeView(doc, 201, u"1. h\xe6\xf0", u"FloorPlan"),
+        haed2=FakeView(doc, 202, u"2. h\xe6\xf0", u"FloorPlan"),
+        snid=FakeView(doc, 203, u"Sni\xf0 A", u"Section"),
+        legend=FakeView(doc, 204, u"Sk\xfdringar", u"Legend"),
+        schedule=FakeView(doc, 205, u"Hur\xf0ir", u"Schedule"),
+        template=FakeView(doc, 206, u"Sni\xf0m\xe1t", u"FloorPlan",
+                          template=True),
+        placed=FakeView(doc, 207, u"Grunnmynd", u"FloorPlan"))
+    sheet_101 = [sh for sh in doc.sheets if sh._number == u"A-101"][0]
+    FakeViewport(doc, sheet_101.Id, views["placed"].Id, None)
+    return doc, a1, a3, views
+
+
+def from_views(recorder, titleblock=None):
+    """A person who keeps the suggested numbers and the views' names."""
+    def answer(labels, chosen, number, count, evaluate):
+        return dict(
+            titleblock=chosen if titleblock is None else titleblock,
+            values=(number[0], naming.numbers(count, number[1]),
+                    number[2], u"", list(recorder.window.names), u""),
+            collection=None)
+    recorder.answer = answer
+    return recorder
+
+
+def viewport_of(doc, view):
+    found = [v for v in doc.viewports if v.ViewId == view.Id]
+    return found[0] if found else None
+
+
+def sheet_by_id(doc, sheet_id):
+    return [sh for sh in doc.sheets if sh.Id == sheet_id][0]
+
+
+doc, a1, a3, views = model_with_views()
+doc.selected = [views["snid"].Id, views["haed2"].Id, views["haed1"].Id,
+                views["legend"].Id, doc.sheets[0].Id]
+rec = run_script(doc, from_views(Recorder()), shift=True)
+check("views: the window gets one row per selected view, sorted",
+      rec.window and rec.window.count == 3 and rec.window.views ==
+      [u"Floor Plan  1. h\xe6\xf0", u"Floor Plan  2. h\xe6\xf0",
+       u"Section  Sni\xf0 A"], rec.window and rec.window.views)
+check("views: each sheet name starts as its view's name",
+      rec.window and rec.window.names == [u"1. h\xe6\xf0",
+                                          u"2. h\xe6\xf0",
+                                          u"Sni\xf0 A"])
+check("views: the selection was used, no list shown",
+      rec.picked_from is None)
+spots = [viewport_of(doc, views[k]) for k in (u"haed1", u"haed2", u"snid")]
+check("views: every view placed on its own new sheet, in order",
+      all(spots) and [sheet_by_id(doc, v.SheetId)._number for v in spots] ==
+      [u"A-902", u"A-903", u"A-904"] and
+      [sheet_by_id(doc, v.SheetId)._name for v in spots] ==
+      [u"1. h\xe6\xf0", u"2. h\xe6\xf0", u"Sni\xf0 A"],
+      [(sheet_by_id(doc, v.SheetId)._number) for v in spots if v])
+check("views: placed in the middle of the title block",
+      all(spots) and all(abs(v.point.X + 0.69) < 1e-9 and
+                         abs(v.point.Y - 0.485) < 1e-9 for v in spots),
+      [(v.point.X, v.point.Y) for v in spots if v and v.point])
+check("views: legend and sheet in the selection are not placed",
+      viewport_of(doc, views["legend"]) is None and
+      len(doc.viewports) == 4)
+check("views: the report lists the views",
+      u"Sni\xf0 A" in rec.text() and u"middle" in rec.text(), rec.text())
+
+doc, a1, a3, views = model_with_views()
+rec = run_script(doc, from_views(Recorder(ticks=[u"2. h"])), shift=True)
+check("views: nothing selected, a list of views not yet on a sheet",
+      rec.picked_from == [u"Floor Plan  1. h\xe6\xf0",
+                          u"Floor Plan  2. h\xe6\xf0",
+                          u"Section  Sni\xf0 A"], rec.picked_from)
+check("views: the ticked view gets a sheet",
+      viewport_of(doc, views["haed2"]) is not None and
+      viewport_of(doc, views["haed1"]) is None)
+
+doc, a1, a3, views = model_with_views()
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder()), shift=True)
+check("views: cancelling the list makes nothing",
+      rec.window is None and doc.numbers() == before and doc.log == [])
+
+doc, a1, a3, views = model_with_views()
+doc.selected = [views["placed"].Id, views["haed1"].Id]
+rec = run_script(doc, from_views(Recorder()), shift=True)
+check("views: one already on a sheet is left out and named",
+      rec.window and rec.window.views == [u"Floor Plan  1. h\xe6\xf0"] and
+      u"Grunnmynd (sheet A-101)" in rec.text(), rec.text())
+check("views: the other still gets its sheet",
+      viewport_of(doc, views["haed1"]) is not None)
+
+doc, a1, a3, views = model_with_views()
+doc.selected = [views["placed"].Id]
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder()), shift=True)
+check("views: every chosen view on a sheet: said so, no window",
+      rec.window is None and doc.log == [] and doc.numbers() == before and
+      u"every chosen view" in rec.text(), rec.text())
+
+doc, a1, a3, views = model_with_views()
+doc.selected = [views["haed1"].Id, views["haed2"].Id]
+doc.unplaceable.add(views["haed2"].Id)
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder()), shift=True)
+check("views: Revit refusing one view: no sheet, no viewport",
+      doc.numbers() == before and len(doc.viewports) == 1 and
+      u"2. h" in rec.text() and u"no sheet was made" in rec.text(),
+      rec.text())
+
+doc, a1, a3, views = model_with_views()
+doc.selected = [views["haed1"].Id]
+doc.viewport_none = True
+before = doc.numbers()
+rec = run_script(doc, from_views(Recorder()), shift=True)
+check("views: a viewport Revit does not return is caught",
+      doc.numbers() == before and u"did not go onto" in rec.text(),
+      rec.text())
+
+doc, a1, a3, views = model_with_views()
+doc.selected = [views["haed1"].Id]
+rec = run_script(doc, from_views(Recorder(), titleblock=2), shift=True)
+spot = viewport_of(doc, views["haed1"])
+check("views: no title block places the view at the origin",
+      spot is not None and spot.point.X == 0.0 and spot.point.Y == 0.0,
+      spot and (spot.point.X, spot.point.Y))
+
+doc, a1, a3, views = model_with_views()
+doc.selected = [views["haed1"].Id]
+rec = run_script(doc, Recorder(batch(1)))
+check("views: without shift, a selected view is not placed",
+      rec.window and rec.window.views is None and
+      viewport_of(doc, views["haed1"]) is None and len(doc.numbers()) == 5)
 
 # --------------------------------------------------------------------------
 
