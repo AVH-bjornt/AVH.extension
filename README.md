@@ -9,8 +9,12 @@ library plus the Revit API, on pyRevit's IronPython engine. The one
 thing bundled is three.js, a JavaScript file the Clash Detector's viewer
 draws with (see `THIRD_PARTY.md`).
 
-**Version 2.58.0.** The authoritative number is `__version__` in
+**Version 2.59.0.** The authoritative number is `__version__` in
 `lib/avh_schedules/__init__.py`; this line is a copy and can drift.
+
+A dot after a button's name (as in pyRevit's own **Match ●**) means
+it does something else when shift-clicked; the button descriptions
+below say what.
 
 ## Install
 
@@ -733,7 +737,8 @@ GitHub, run `Install_AVH_Extensions.bat` once.
 | 2.55.0 | Data panel: Renumber, one text or whole number instance parameter numbered across selected or picked elements as prefix + running number + suffix, in the order picked or by position; a leading zero start keeps its width (#QQC001 to #QQC999); optionally only elements with no value, skipping numbers in use | Tried in Revit 2025 |
 | 2.56.0 | Data panel: Rename Types, family types renamed from their own parameter values with a pattern such as `{Width}x{Height} {Material}`, for the selected elements' types or every type of ticked families; clashes within a family shown before writing, swaps allowed | Not yet run in Revit |
 | 2.57.0 | Batch Sheets shift-click: a sheet for each selected (or ticked) view, the view placed in the middle of the title block | Ran in Revit 2025 |
-| 2.58.0 | Batch Sheets shift-click: the new views can be aligned to a view on another sheet by the top left of the crop region, as Align Views does; that crop corner code now lives in `lib/avh_viewports/corners.py`, shared by both | Ran in Revit 2025; current |
+| 2.58.0 | Batch Sheets shift-click: the new views can be aligned to a view on another sheet by the top left of the crop region, as Align Views does; that crop corner code now lives in `lib/avh_viewports/corners.py`, shared by both | Ran in Revit 2025 |
+| 2.59.0 | Shift-click buttons show pyRevit's dot: Isolate Warnings, Clash Detector, Split Wall Layers, Batch Sheets and Hide Across Views each get the same `config.py`, which runs the button's `script.py`; `test_shift_click_dots.py` keeps the dots and the shift handling in step | Not yet run in Revit; current |
 
 ## Licence
 
